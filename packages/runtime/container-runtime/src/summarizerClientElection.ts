@@ -45,6 +45,10 @@ export class SummarizerClientElection
         return this.clientElection.electedClient?.clientId;
     }
 
+    public get hasSummarizer() {
+        return this.clientElection.hasSummarizer;
+    }
+
     constructor(
         private readonly logger: ITelemetryLogger,
         private readonly summaryCollection: IEventProvider<ISummaryCollectionOpEvents>,
@@ -56,8 +60,7 @@ export class SummarizerClientElection
         // On every inbound op, if enough ops pass without seeing a summary ack (per elected client),
         // elect a new client and log to telemetry.
         this.summaryCollection.on("default", ({ sequenceNumber }) => {
-            const electedClientId = this.electedClientId;
-            if (electedClientId === undefined) {
+            if (!this.hasSummarizer) {
                 // Reset election if no elected client, but eligible clients are connected.
                 // This should be uncommon, but is possible if the initial state of the
                 // ordered client election contains an undefined client id or one not found
@@ -75,7 +78,7 @@ export class SummarizerClientElection
                 if (opsSinceLastReport > this.maxOpsSinceLastSummary) {
                     this.logger.sendErrorEvent({
                         eventName: "ElectedClientNotSummarizing",
-                        electedClientId,
+                        electedClientId: this.electedClientId,
                         lastSummaryAckSeqForClient: this.lastSummaryAckSeqForClient,
                         electionSequenceNumber,
                         nextElectedClientId: this.clientElection.peekNextElectedClient()?.clientId,

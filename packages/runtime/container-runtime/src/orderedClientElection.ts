@@ -218,6 +218,8 @@ export interface IOrderedClientElection extends IEventProvider<IOrderedClientEle
     readonly electedClient: ITrackedClient | undefined;
     /** Sequence number of most recent election. */
     readonly electionSequenceNumber: number;
+    /** True if the IOCE has appointed a summarizer */
+    readonly hasSummarizer: boolean;
     /** Marks the currently elected client as invalid, and elects the next eligible client. */
     incrementElectedClient(sequenceNumber: number): void;
     /** Resets the currently elected client back to the oldest eligible client. */
@@ -241,6 +243,7 @@ export class OrderedClientElection
     implements IOrderedClientElection {
     private _eligibleCount: number = 0;
     private _electedClient: ILinkedClient | undefined;
+    private _summarizerClient: ILinkedClient | undefined;
     private _electionSequenceNumber: number;
 
     public get eligibleCount() {
@@ -251,6 +254,10 @@ export class OrderedClientElection
     }
     public get electionSequenceNumber() {
         return this._electionSequenceNumber;
+    }
+
+    public get hasSummarizer() {
+        return this._electedClient !== undefined || this._summarizerClient !== undefined;
     }
 
     constructor(
@@ -335,9 +342,16 @@ export class OrderedClientElection
     private addClient(client: ILinkedClient, sequenceNumber: number): void {
         if (this.isEligibleFn(client)) {
             this._eligibleCount++;
-            if (this._electedClient === undefined) {
+            if (!this.hasSummarizer) {
                 // Automatically elect latest client
                 this.tryElectingClient(client, sequenceNumber);
+            }
+        }
+        else if (client.client.details.type === "summmarizer") {
+            // Track this as the summarizer client if there's already an elected client.
+            // If there's no elected client, this must be an on-demand summarizer.
+            if (this._electedClient !== undefined && this._summarizerClient === undefined) {
+                this._summarizerClient = client;
             }
         }
     }
@@ -352,9 +366,23 @@ export class OrderedClientElection
         if (this.isEligibleFn(client)) {
             this._eligibleCount--;
             if (this._electedClient === client) {
-                // Automatically shift to next oldest client
-                const nextClient = this.findFirstEligibleClient(this._electedClient.youngerClient);
-                this.tryElectingClient(nextClient, sequenceNumber);
+                if (this._summarizerClient === undefined) {
+                    // Automatically shift to next oldest client
+                    const nextClient = this.findFirstEligibleClient(this._electedClient.youngerClient);
+                    this.tryElectingClient(nextClient, sequenceNumber);
+                }
+                else {
+                    // The summarizer is still around. Let it finish what it's doing before electing a new client,
+                    // but note that the former elected client is now gone.
+                    this._electedClient = undefined;
+                }
+            }
+        }
+        else if (this._summarizerClient === client) {
+            // The summarizer is gone. Elect a new client if we don't still have one.
+            this._summarizerClient = undefined;
+            if (this._electedClient === undefined) {
+                this.resetElectedClient(sequenceNumber);
             }
         }
     }
@@ -364,11 +392,13 @@ export class OrderedClientElection
     }
 
     public incrementElectedClient(sequenceNumber: number): void {
+        this._summarizerClient = undefined;
         const nextClient = this.findFirstEligibleClient(this._electedClient?.youngerClient);
         this.tryElectingClient(nextClient, sequenceNumber);
     }
 
     public resetElectedClient(sequenceNumber: number): void {
+        this._summarizerClient = undefined;
         const firstClient = this.findFirstEligibleClient(this.orderedClientCollection.oldestClient);
         this.tryElectingClient(firstClient, sequenceNumber);
     }
