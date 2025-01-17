@@ -19,14 +19,18 @@ export class CheckpointContext {
 		private readonly id: string,
 		private readonly checkpointManager: IDeliCheckpointManager,
 		private readonly context: IContext,
-		private readonly checkpointService: ICheckpointService,
+		private readonly checkpointService: ICheckpointService | undefined,
 	) {}
 
 	/**
 	 * Checkpoints to the database & kafka
 	 * Note: This is an async method, but you should not await this
 	 */
-	public async checkpoint(checkpoint: ICheckpointParams, restartOnCheckpointFailure?: boolean) {
+	public async checkpoint(
+		checkpoint: ICheckpointParams,
+		restartOnCheckpointFailure?: boolean,
+		globalCheckpointOnly?: boolean,
+	): Promise<void> {
 		// Exit early if already closed
 		if (this.closed) {
 			return;
@@ -38,14 +42,19 @@ export class CheckpointContext {
 			return;
 		}
 
+		let databaseCheckpointFailed = false;
+		const lumberjackProperties = {
+			...getLumberBaseProperties(this.id, this.tenantId),
+		};
+
 		// Database checkpoint
 		try {
-			this.pendingUpdateP = this.checkpointCore(checkpoint);
+			this.pendingUpdateP = this.checkpointCore(checkpoint, globalCheckpointOnly);
 			await this.pendingUpdateP;
-		} catch (ex) {
+		} catch (error) {
 			// TODO flag context as error / use this.context.error() instead?
 			this.context.log?.error(
-				`Error writing checkpoint to the database: ${JSON.stringify(ex)}`,
+				`Error writing checkpoint to the database: ${JSON.stringify(error)}, ${error}`,
 				{
 					messageMetaData: {
 						documentId: this.id,
@@ -55,55 +64,72 @@ export class CheckpointContext {
 			);
 			Lumberjack.error(
 				`Error writing checkpoint to the database`,
-				getLumberBaseProperties(this.id, this.tenantId),
-				ex,
+				lumberjackProperties,
+				error,
 			);
-			return;
+			databaseCheckpointFailed = true;
 		}
 
-		// Kafka checkpoint
-		try {
-			// depending on the sequence of events, it might try to checkpoint the same offset a second time
-			// detect and prevent that case here
-			const kafkaCheckpointMessage = checkpoint.kafkaCheckpointMessage;
-			if (
-				kafkaCheckpointMessage &&
-				(this.lastKafkaCheckpointOffset === undefined ||
-					kafkaCheckpointMessage.offset > this.lastKafkaCheckpointOffset)
-			) {
-				this.lastKafkaCheckpointOffset = kafkaCheckpointMessage.offset;
-				this.context.checkpoint(kafkaCheckpointMessage, restartOnCheckpointFailure);
+		// We write a kafka checkpoint if either the local or global checkpoint succeeds
+		// databaseCheckpointFailed is true only if both local and global checkpoint fail
+		if (databaseCheckpointFailed) {
+			Lumberjack.info(
+				`Skipping kafka checkpoint due to database checkpoint failure.`,
+				lumberjackProperties,
+			);
+			databaseCheckpointFailed = false;
+		} else {
+			// Kafka checkpoint
+			try {
+				// depending on the sequence of events, it might try to checkpoint the same offset a second time
+				// detect and prevent that case here
+				const kafkaCheckpointMessage = checkpoint.kafkaCheckpointMessage;
+				if (
+					kafkaCheckpointMessage &&
+					(this.lastKafkaCheckpointOffset === undefined ||
+						kafkaCheckpointMessage.offset > this.lastKafkaCheckpointOffset)
+				) {
+					this.lastKafkaCheckpointOffset = kafkaCheckpointMessage.offset;
+					this.context.checkpoint(kafkaCheckpointMessage, restartOnCheckpointFailure);
+				}
+			} catch (error) {
+				// TODO flag context as error / use this.context.error() instead?
+				this.context.log?.error(
+					`Error writing checkpoint to kafka: ${JSON.stringify(error)}`,
+					{
+						messageMetaData: {
+							documentId: this.id,
+							tenantId: this.tenantId,
+						},
+					},
+				);
+				Lumberjack.error(
+					`Error writing checkpoint to the kafka`,
+					lumberjackProperties,
+					error,
+				);
 			}
-		} catch (ex) {
-			// TODO flag context as error / use this.context.error() instead?
-			this.context.log?.error(`Error writing checkpoint to kafka: ${JSON.stringify(ex)}`, {
-				messageMetaData: {
-					documentId: this.id,
-					tenantId: this.tenantId,
-				},
-			});
-			Lumberjack.error(
-				`Error writing checkpoint to the kafka`,
-				getLumberBaseProperties(this.id, this.tenantId),
-				ex,
-			);
 		}
-
 		this.pendingUpdateP = undefined;
 
 		// Trigger another round if there is a pending update
 		if (this.pendingCheckpoint) {
 			const pendingCheckpoint = this.pendingCheckpoint;
 			this.pendingCheckpoint = undefined;
-			void this.checkpoint(pendingCheckpoint);
+			this.checkpoint(pendingCheckpoint).catch((error) => {
+				Lumberjack.error("Error writing checkpoint", lumberjackProperties, error);
+			});
 		}
 	}
 
-	public close() {
+	public close(): void {
 		this.closed = true;
 	}
 
-	private checkpointCore(checkpoint: ICheckpointParams) {
+	private async checkpointCore(
+		checkpoint: ICheckpointParams,
+		globalCheckpointOnly: boolean = false,
+	): Promise<void> {
 		// Exit early if already closed
 		if (this.closed) {
 			return;
@@ -111,10 +137,14 @@ export class CheckpointContext {
 
 		let updateP: Promise<void>;
 
-		const localCheckpointEnabled = this.checkpointService.localCheckpointEnabled;
+		const localCheckpointEnabled = this.checkpointService?.getLocalCheckpointEnabled();
 
 		// determine if checkpoint is local
-		const isLocal = localCheckpointEnabled && checkpoint.reason !== CheckpointReason.NoClients;
+		const isLocal =
+			globalCheckpointOnly === true
+				? false
+				: localCheckpointEnabled === true &&
+				  checkpoint.reason !== CheckpointReason.NoClients;
 
 		if (checkpoint.clear) {
 			updateP = this.checkpointManager.deleteCheckpoint(checkpoint, isLocal);
@@ -128,8 +158,6 @@ export class CheckpointContext {
 			);
 		}
 
-		// Retry the checkpoint on error
-		// eslint-disable-next-line @typescript-eslint/promise-function-async
 		return updateP.catch((error) => {
 			this.context.log?.error(
 				`Error writing checkpoint to MongoDB: ${JSON.stringify(error)}`,
@@ -145,9 +173,7 @@ export class CheckpointContext {
 				getLumberBaseProperties(this.id, this.tenantId),
 				error,
 			);
-			return new Promise<void>((resolve, reject) => {
-				resolve(this.checkpointCore(checkpoint));
-			});
+			throw error;
 		});
 	}
 }

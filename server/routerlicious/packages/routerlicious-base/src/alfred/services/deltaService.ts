@@ -6,15 +6,18 @@
 import { toUtf8 } from "@fluidframework/common-utils";
 import { ISequencedDocumentMessage } from "@fluidframework/protocol-definitions";
 import {
+	ICollection,
 	IDeltaService,
 	ISequencedOperationMessage,
 	ITenantManager,
-	MongoManager,
 } from "@fluidframework/server-services-core";
 
+/**
+ * @internal
+ */
 export class DeltaService implements IDeltaService {
 	constructor(
-		protected readonly mongoManager: MongoManager,
+		protected readonly deltasCollection: ICollection<ISequencedOperationMessage>,
 		protected readonly tenantManager: ITenantManager,
 	) {}
 
@@ -68,9 +71,7 @@ export class DeltaService implements IDeltaService {
 		query: any,
 		sort: any,
 	): Promise<ISequencedDocumentMessage[]> {
-		const db = await this.mongoManager.getDatabase();
-		const collection = db.collection<ISequencedOperationMessage>(collectionName);
-		const dbDeltas = await collection.find(query, sort);
+		const dbDeltas = await this.deltasCollection.find(query, sort);
 		return dbDeltas.map((delta) => delta.operation);
 	}
 

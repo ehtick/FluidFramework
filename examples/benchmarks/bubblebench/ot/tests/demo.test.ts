@@ -3,7 +3,7 @@
  * Licensed under the MIT License.
  */
 
-import { globals } from "../jest.config";
+import { globals } from "../jest.config.cjs";
 
 describe("Bubblebench", () => {
 	describe("SharedOT", () => {
@@ -15,12 +15,12 @@ describe("Bubblebench", () => {
 
 		beforeEach(async () => {
 			await page.goto(globals.PATH, { waitUntil: "load" });
-			await page.waitFor(() => window["fluidStarted"]);
+			await page.waitForFunction(() => window["fluidStarted"]);
 		});
 
 		it("The page loads and displays current FPS", async () => {
 			// Validate there is a button that can be clicked
-			await expect(page).toMatch("FPS", { timeout: 0 });
+			await expect(page).toMatchTextContent("FPS", { timeout: 0 });
 		}, 20000);
 	});
 });

@@ -3,12 +3,14 @@
  * Licensed under the MIT License.
  */
 
-import { ModelContainerRuntimeFactory } from "@fluid-example/example-utils";
-import { IContainer } from "@fluidframework/container-definitions";
-import { IContainerRuntime } from "@fluidframework/container-runtime-definitions";
-import { requestFluidObject } from "@fluidframework/runtime-utils";
+import {
+	ModelContainerRuntimeFactory,
+	getDataStoreEntryPoint,
+} from "@fluid-example/example-utils";
+import { IContainer } from "@fluidframework/container-definitions/legacy";
+import { IContainerRuntime } from "@fluidframework/container-runtime-definitions/legacy";
 
-import { DiceRollerInstantiationFactory, IDiceRoller } from "./dataObject";
+import { DiceRollerInstantiationFactory, IDiceRoller } from "./dataObject.js";
 
 /**
  * The data model for our application.
@@ -48,10 +50,8 @@ export class DiceRollerContainerRuntimeFactory extends ModelContainerRuntimeFact
 	 * {@inheritDoc ModelContainerRuntimeFactory.createModel}
 	 */
 	protected async createModel(runtime: IContainerRuntime, container: IContainer) {
-		const diceRoller = await requestFluidObject<IDiceRoller>(
-			await runtime.getRootDataStore(diceRollerId),
-			"",
+		return new DiceRollerAppModel(
+			await getDataStoreEntryPoint<IDiceRoller>(runtime, diceRollerId),
 		);
-		return new DiceRollerAppModel(diceRoller);
 	}
 }

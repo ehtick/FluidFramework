@@ -2,26 +2,27 @@
  * Copyright (c) Microsoft Corporation and contributors. All rights reserved.
  * Licensed under the MIT License.
  */
-import { strict as assert } from "assert";
-import chalk from "chalk";
+
+import { strict as assert } from "node:assert";
 import { Machine } from "jssm";
+import chalk from "picocolors";
 
 import { FluidRepo, MonoRepo } from "@fluidframework/build-tools";
 
 import { bumpVersionScheme, detectVersionScheme } from "@fluid-tools/version-tools";
 
+import { getDefaultInterdependencyRange } from "../config.js";
 import {
-	bumpReleaseGroup,
 	difference,
 	getPreReleaseDependencies,
 	npmCheckUpdates,
 	setVersion,
-} from "../lib";
-import { CommandLogger } from "../logging";
-import { MachineState } from "../machines";
-import { ReleaseGroup, ReleasePackage, isReleaseGroup } from "../releaseGroups";
-import { FluidReleaseStateHandlerData } from "./fluidReleaseStateHandler";
-import { BaseStateHandler, StateHandlerFunction } from "./stateHandlers";
+} from "../library/index.js";
+import { CommandLogger } from "../logging.js";
+import { MachineState } from "../machines/index.js";
+import { ReleaseGroup, ReleasePackage, isReleaseGroup } from "../releaseGroups.js";
+import { FluidReleaseStateHandlerData } from "./fluidReleaseStateHandler.js";
+import { BaseStateHandler, StateHandlerFunction } from "./stateHandlers.js";
 
 /**
  * Bumps any pre-release dependencies that have been released.
@@ -81,7 +82,7 @@ export const doBumpReleasedDependencies: StateHandlerFunction = async (
 		if (pkg.monoRepo === undefined) {
 			updatedPkgs.add(pkg.name);
 		} else {
-			updatedReleaseGroups.add(pkg.monoRepo.kind);
+			updatedReleaseGroups.add(pkg.monoRepo.releaseGroup);
 		}
 	}
 
@@ -119,6 +120,13 @@ export const doBumpReleasedDependencies: StateHandlerFunction = async (
 	}
 
 	if (updatedPackages.length > 0) {
+		log?.verbose(`Running install if needed.`);
+		await FluidRepo.ensureInstalled(
+			isReleaseGroup(releaseGroup)
+				? context.packagesInReleaseGroup(releaseGroup)
+				: // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+					[context.fullPackageMap.get(releaseGroup)!],
+		);
 		// There were updates, which is considered a failure.
 		BaseStateHandler.signalFailure(machine, state);
 		context.repo.reload();
@@ -152,16 +160,16 @@ export const doReleaseGroupBump: StateHandlerFunction = async (
 
 	const rgRepo = isReleaseGroup(releaseGroup)
 		? // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-		  context.repo.releaseGroups.get(releaseGroup)!
+			context.repo.releaseGroups.get(releaseGroup)!
 		: // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-		  context.fullPackageMap.get(releaseGroup)!;
+			context.fullPackageMap.get(releaseGroup)!;
 
 	const scheme = detectVersionScheme(releaseVersion);
 	const newVersion = bumpVersionScheme(releaseVersion, bumpType, scheme);
 	const packages = rgRepo instanceof MonoRepo ? rgRepo.packages : [rgRepo];
 
 	log.info(
-		`Bumping ${releaseGroup} from ${releaseVersion} to ${newVersion} (${chalk.blue(
+		`Bumping ${releaseGroup} from ${releaseVersion} to ${newVersion.version} (${chalk.blue(
 			bumpType,
 		)} bump)!`,
 	);
@@ -170,11 +178,11 @@ export const doReleaseGroupBump: StateHandlerFunction = async (
 		context,
 		rgRepo,
 		newVersion,
-		rgRepo instanceof MonoRepo ? rgRepo.interdependencyRange : undefined,
+		rgRepo instanceof MonoRepo ? getDefaultInterdependencyRange(rgRepo, context) : undefined,
 		log,
 	);
 
-	if (shouldInstall === true && !(await FluidRepo.ensureInstalled(packages, false))) {
+	if (shouldInstall === true && !(await FluidRepo.ensureInstalled(packages))) {
 		log.errorLog("Install failed.");
 		BaseStateHandler.signalFailure(machine, state);
 		return true;

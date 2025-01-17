@@ -3,13 +3,12 @@
  * Licensed under the MIT License.
  */
 
-export { extensionMessageSource } from "./Constants";
-export {
-	devToolsInitMessageType,
+export { extensionViewMessageSource, extensionPopupMessageSource } from "./Constants.js";
+export type {
 	DevToolsInitMessageData,
 	DevToolsInitMessage,
-	devToolsInitAcknowledgementType,
 	DevToolsInitAcknowledgement,
-} from "./Messages";
-export { TypedPortConnection } from "./TypedPortConnection";
-export { postMessageToPort, relayMessageToPort, relayMessageToWindow } from "./Utilities";
+} from "./Messages.js";
+export { devToolsInitMessageType, devToolsInitAcknowledgementType } from "./Messages.js";
+export type { TypedPortConnection } from "./TypedPortConnection.js";
+export { postMessageToPort, relayMessageToPort } from "./Utilities.js";

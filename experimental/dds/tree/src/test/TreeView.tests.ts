@@ -4,14 +4,17 @@
  */
 
 import { strict as assert } from 'assert';
+
+import { validateAssertionError } from '@fluidframework/test-runtime-utils/internal';
 import { expect } from 'chai';
-import { validateAssertionError } from '@fluidframework/test-runtime-utils';
-import { Definition, TraitLabel } from '../Identifiers';
-import { RevisionView } from '../RevisionView';
-import { ChangeNode } from '../persisted-types';
-import { refreshTestTree } from './utilities/TestUtilities';
-import { TestNode } from './utilities/TestNode';
-import { expectDefined } from './utilities/TestCommon';
+
+import { Definition, TraitLabel } from '../Identifiers.js';
+import { RevisionView } from '../RevisionView.js';
+import { ChangeNode } from '../persisted-types/index.js';
+
+import { expectDefined } from './utilities/TestCommon.js';
+import { TestNode } from './utilities/TestNode.js';
+import { refreshTestTree } from './utilities/TestUtilities.js';
 
 describe('TreeView', () => {
 	const testTree = refreshTestTree();
@@ -41,7 +44,7 @@ describe('TreeView', () => {
 			const viewB = RevisionView.fromTree(testTree.buildLeaf(testTree.generateNodeId()));
 			assert.throws(
 				() => viewA.delta(viewB),
-				(e) => validateAssertionError(e, 'Delta can only be calculated between views that share a root')
+				(e: Error) => validateAssertionError(e, 'Delta can only be calculated between views that share a root')
 			);
 		});
 

@@ -17,9 +17,11 @@ import {
 } from "@fluidframework/server-services-core";
 import { getLumberBaseProperties, Lumberjack } from "@fluidframework/server-services-telemetry";
 import { ICheckpointManager } from "./interfaces";
+import { isLocalCheckpoint } from "./utils";
 
 /**
  * MongoDB specific implementation of ICheckpointManager
+ * @internal
  */
 export class CheckpointManager implements ICheckpointManager {
 	private readonly clientFacadeRetryEnabled: boolean;
@@ -29,8 +31,9 @@ export class CheckpointManager implements ICheckpointManager {
 		private readonly documentId: string,
 		private readonly documentRepository: IDocumentRepository,
 		private readonly opCollection: ICollection<ISequencedOperationMessage>,
-		private readonly deltaService: IDeltaService,
+		private readonly deltaService: IDeltaService | undefined,
 		private readonly getDeltasViaAlfred: boolean,
+		private readonly verifyLastOpPersistence: boolean,
 		private readonly checkpointService: ICheckpointService,
 	) {
 		this.clientFacadeRetryEnabled = isRetryEnabled(this.opCollection);
@@ -44,9 +47,12 @@ export class CheckpointManager implements ICheckpointManager {
 		protocolHead: number,
 		pending: ISequencedOperationMessage[],
 		noActiveClients: boolean,
-	) {
-		if (this.getDeltasViaAlfred) {
-			if (pending.length > 0) {
+		globalCheckpointOnly: boolean,
+		markAsCorrupt: boolean = false,
+	): Promise<void> {
+		const isLocal = isLocalCheckpoint(noActiveClients, globalCheckpointOnly);
+		if (this.getDeltasViaAlfred && this.deltaService !== undefined) {
+			if (pending.length > 0 && this.verifyLastOpPersistence) {
 				// Verify that the last pending op has been persisted to op storage
 				// If it is, we can checkpoint
 				const expectedSequenceNumber = pending[pending.length - 1].operation.sequenceNumber;
@@ -56,6 +62,7 @@ export class CheckpointManager implements ICheckpointManager {
 					this.documentId,
 					expectedSequenceNumber - 1,
 					expectedSequenceNumber + 1,
+					"scribe",
 				);
 
 				// If we don't get the expected delta, retry after a delay
@@ -79,6 +86,7 @@ export class CheckpointManager implements ICheckpointManager {
 						this.documentId,
 						expectedSequenceNumber - 1,
 						expectedSequenceNumber + 1,
+						"scribe",
 					);
 
 					if (
@@ -102,7 +110,8 @@ export class CheckpointManager implements ICheckpointManager {
 				this.tenantId,
 				"scribe",
 				checkpoint,
-				!noActiveClients,
+				isLocal,
+				markAsCorrupt,
 			);
 		} else {
 			// The order of the three operations below is important.
@@ -127,7 +136,10 @@ export class CheckpointManager implements ICheckpointManager {
 					3 /* maxRetries */,
 					1000 /* retryAfterMs */,
 					getLumberBaseProperties(this.documentId, this.tenantId),
-					(error) => error.code === 11000 /* shouldIgnoreError */,
+					(error) =>
+						error.code === 11000 ||
+						error.message?.toString()?.indexOf("E11000 duplicate key") >=
+							0 /* shouldIgnoreError */,
 					(error) => !this.clientFacadeRetryEnabled /* shouldRetry */,
 				);
 			}
@@ -138,7 +150,8 @@ export class CheckpointManager implements ICheckpointManager {
 				this.tenantId,
 				"scribe",
 				checkpoint,
-				!noActiveClients,
+				isLocal,
+				markAsCorrupt,
 			);
 
 			// And then delete messagses that were already summarized.
@@ -153,7 +166,7 @@ export class CheckpointManager implements ICheckpointManager {
 	/**
 	 * Removes the checkpoint information from MongoDB
 	 */
-	public async delete(sequenceNumber: number, lte: boolean) {
+	public async delete(sequenceNumber: number, lte: boolean): Promise<void> {
 		// Clears the checkpoint information from mongodb.
 		await this.documentRepository.updateOne(
 			{

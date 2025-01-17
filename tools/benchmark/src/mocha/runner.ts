@@ -5,30 +5,18 @@
 
 import { assert } from "chai";
 import { Test } from "mocha";
+
 import {
-	BenchmarkType,
 	BenchmarkArguments,
 	isParentProcess,
 	isInPerformanceTestingMode,
-	performanceTestSuiteTag,
-	userCategoriesSplitter,
-	TestType,
 	Titled,
 	MochaExclusiveOptions,
-	BenchmarkDescription,
+	qualifiedTitle,
+	TestType,
 } from "../Configuration";
-import { BenchmarkResult, Phase, runBenchmark } from "../runBenchmark";
-
-export function qualifiedTitle(args: BenchmarkDescription & Titled): string {
-	const benchmarkTypeTag = BenchmarkType[args.type ?? BenchmarkType.Measurement];
-	const testTypeTag = TestType[TestType.ExecutionTime];
-	let qualifiedTitle = `${performanceTestSuiteTag} @${benchmarkTypeTag} @${testTypeTag} ${args.title}`;
-
-	if (args.category !== "") {
-		qualifiedTitle = `${qualifiedTitle} ${userCategoriesSplitter} @${args.category}`;
-	}
-	return qualifiedTitle;
-}
+import type { BenchmarkResult } from "../ResultTypes";
+import { Phase, runBenchmark } from "../runBenchmark";
 
 /**
  * This is wrapper for Mocha's it function that runs a performance benchmark.
@@ -47,7 +35,7 @@ export function qualifiedTitle(args: BenchmarkDescription & Titled): string {
  */
 export function benchmark(args: BenchmarkArguments): Test {
 	return supportParentProcess({
-		title: qualifiedTitle(args),
+		title: qualifiedTitle({ ...args, testType: TestType.ExecutionTime }),
 		only: args.only,
 		run: async () => {
 			const innerArgs = {
@@ -119,7 +107,7 @@ export function supportParentProcess<
 			}
 
 			// Do this import only if isParentProcess to enable running in the web as long as isParentProcess is false.
-			const childProcess = await import("child_process");
+			const childProcess = await import("node:child_process");
 			const result = childProcess.spawnSync(command, childArgs, { encoding: "utf8" });
 
 			if (result.error) {

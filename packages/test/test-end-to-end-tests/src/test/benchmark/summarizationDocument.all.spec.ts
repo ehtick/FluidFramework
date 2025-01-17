@@ -2,17 +2,21 @@
  * Copyright (c) Microsoft Corporation and contributors. All rights reserved.
  * Licensed under the MIT License.
  */
+
 import { strict as assert } from "assert";
-import { IContainer } from "@fluidframework/container-definitions";
-import { ITestObjectProvider } from "@fluidframework/test-utils";
-import { describeE2EDocRun, getCurrentBenchmarkType } from "@fluid-internal/test-version-utils";
+
+import { describeE2EDocRun, getCurrentBenchmarkType } from "@fluid-private/test-version-utils";
+import { IContainer } from "@fluidframework/container-definitions/internal";
+import { delay } from "@fluidframework/core-utils/internal";
+import { ITestObjectProvider } from "@fluidframework/test-utils/internal";
+
 import {
-	benchmarkAll,
-	createDocument,
 	IBenchmarkParameters,
 	IDocumentLoaderAndSummarizer,
 	ISummarizeResult,
-} from "./DocumentCreator";
+	benchmarkAll,
+	createDocument,
+} from "./DocumentCreator.js";
 
 const scenarioTitle = "Summarize Document";
 describeE2EDocRun(scenarioTitle, (getTestObjectProvider, getDocumentInfo) => {
@@ -24,18 +28,30 @@ describeE2EDocRun(scenarioTitle, (getTestObjectProvider, getDocumentInfo) => {
 	before(async () => {
 		provider = getTestObjectProvider();
 		const docData = getDocumentInfo(); // returns the type of document to be processed.
+		if (
+			docData.supportedEndpoints &&
+			!docData.supportedEndpoints?.includes(provider.driver.type)
+		) {
+			return;
+		}
 		documentWrapper = createDocument({
 			testName: `${scenarioTitle} - ${docData.testTitle}`,
 			provider,
 			documentType: docData.documentType,
+			documentTypeInfo: docData.documentTypeInfo,
 			benchmarkType,
 		});
 		await documentWrapper.initializeDocument();
 		// Summarize the first time.
-		await documentWrapper.summarize();
+		const lastSummarizeClient = await documentWrapper.summarize(
+			documentWrapper.mainContainer,
+			undefined,
+			/* close container */ true,
+		);
+		summaryVersion = lastSummarizeClient.summaryVersion;
 	});
 
-	beforeEach(async function () {
+	beforeEach("conditionalSkip", async function () {
 		const docData = getDocumentInfo();
 		if (
 			docData.supportedEndpoints &&
@@ -63,16 +79,28 @@ describeE2EDocRun(scenarioTitle, (getTestObjectProvider, getDocumentInfo) => {
 				assert(this.container !== undefined, "container needs to be defined.");
 				await provider.ensureSynchronized();
 				assert(this.container.closed !== true, "container needs to be open.");
-				this.summarizerClient = await documentWrapper.summarize(summaryVersion);
-				assert(
-					this.summarizerClient.summaryVersion !== undefined,
-					"summaryVersion needs to be defined.",
-				);
-				summaryVersion = this.summarizerClient.summaryVersion;
+				try {
+					this.summarizerClient = await documentWrapper.summarize(
+						this.container,
+						summaryVersion,
+						/* close container */ false,
+					);
+
+					assert(
+						this.summarizerClient.summaryVersion !== undefined,
+						"summaryVersion needs to be defined.",
+					);
+					summaryVersion = this.summarizerClient.summaryVersion;
+					this.summarizerClient.summarizer.close();
+				} catch (error) {
+					throw new Error(`Error summarizing: ${error}`);
+				}
+				this.container.close();
 			}
-			beforeIteration(): void {
+			async before(): Promise<void> {
 				this.container = undefined;
 				this.summarizerClient = undefined;
+				await delay(2000);
 			}
 		})(),
 	);

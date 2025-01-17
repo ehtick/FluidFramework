@@ -3,14 +3,17 @@
  * Licensed under the MIT License.
  */
 
-import { ModelContainerRuntimeFactory } from "@fluid-example/example-utils";
-import type { IContainer } from "@fluidframework/container-definitions";
-import type { IContainerRuntime } from "@fluidframework/container-runtime-definitions";
-import { requestFluidObject } from "@fluidframework/runtime-utils";
+import {
+	ModelContainerRuntimeFactory,
+	getDataStoreEntryPoint,
+} from "@fluid-example/example-utils";
+import type { IContainer } from "@fluidframework/container-definitions/legacy";
+import type { IContainerRuntime } from "@fluidframework/container-runtime-definitions/legacy";
 
-import type { IAppModel, IBaseDocument } from "../model-interface";
-import { AppModel } from "./appModel";
-import { BaseDocumentInstantiationFactory } from "./taskList";
+import type { IAppModel, IBaseDocument } from "../model-interface/index.js";
+
+import { AppModel } from "./appModel.js";
+import { BaseDocumentInstantiationFactory } from "./taskList.js";
 
 const taskListCollectionId = "base-document";
 
@@ -20,7 +23,7 @@ const taskListCollectionId = "base-document";
  * fetching the new data. This is an enum as there may be more signals that need to be created.
  */
 const SignalType = {
-	ExternalDataChanged: "ExternalDataChange",
+	ExternalDataChanged: "ExternalDataChanged_V1.0.0",
 };
 
 /**
@@ -61,20 +64,23 @@ export class BaseDocumentContainerRuntimeFactory extends ModelContainerRuntimeFa
 		runtime: IContainerRuntime,
 		container: IContainer,
 	): Promise<AppModel> {
-		const taskListCollection = await requestFluidObject<IBaseDocument>(
-			await runtime.getRootDataStore(taskListCollectionId),
-			"",
+		const taskListCollection = await getDataStoreEntryPoint<IBaseDocument>(
+			runtime,
+			taskListCollectionId,
 		);
 		// Register listener only once the model is fully loaded and ready
 		runtime.on("signal", (message) => {
-			// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-			if (message?.content?.type === SignalType.ExternalDataChanged) {
-				// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-				const taskListId = message?.content?.taskListId as string;
-				const taskList = taskListCollection.getTaskList(taskListId);
+			if (message?.type === SignalType.ExternalDataChanged) {
+				const externalTaskListId = (
+					message?.content as { externalTaskListId?: unknown } | undefined
+				)?.externalTaskListId as string;
+				if (externalTaskListId === undefined) {
+					throw new Error("Signal with undefined externalTaskListId");
+				}
+				const taskList = taskListCollection.getTaskList(externalTaskListId);
 				if (taskList === undefined) {
 					throw new Error(
-						`TaskList with id '${taskListId}' does not exist in collection`,
+						`TaskList with id '${externalTaskListId}' does not exist in collection`,
 					);
 				}
 				taskList.importExternalData().catch(console.error);

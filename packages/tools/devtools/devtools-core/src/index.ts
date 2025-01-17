@@ -21,12 +21,22 @@
  * @packageDocumentation
  */
 
-export { AudienceClientMetadata, MemberChangeKind } from "./AudienceMetadata";
-export { FluidObjectId, HasContainerId, HasFluidObjectId } from "./CommonInterfaces";
-export { ContainerStateChangeKind } from "./Container";
-export { ContainerDevtoolsProps } from "./ContainerDevtools";
-export { ContainerMetadata, ContainerStateMetadata } from "./ContainerMetadata";
-export {
+export type { AudienceClientMetadata } from "./AudienceMetadata.js";
+export { MemberChangeKind } from "./AudienceMetadata.js";
+export type {
+	ContainerKey,
+	FluidObjectId,
+	HasContainerKey,
+	HasFluidObjectId,
+} from "./CommonInterfaces.js";
+export { EditType } from "./CommonInterfaces.js";
+export { ContainerStateChangeKind } from "./Container.js";
+export type { ContainerDevtoolsProps } from "./ContainerDevtools.js";
+export type { ContainerStateMetadata } from "./ContainerMetadata.js";
+export type {
+	Edit,
+	EditData,
+	EditSharedObject,
 	FluidHandleNode,
 	FluidObjectNode,
 	FluidObjectNodeBase,
@@ -35,33 +45,36 @@ export {
 	FluidUnknownObjectNode,
 	Primitive,
 	RootHandleNode,
+	SharedObjectEdit,
 	TreeNodeBase,
 	ValueNodeBase,
 	VisualChildNode,
 	VisualNode,
 	VisualNodeBase,
-	VisualNodeKind,
 	VisualTreeNode,
 	VisualValueNode,
-	VisualizeChildData,
-	VisualizeSharedObject,
 	UnknownObjectNode,
-} from "./data-visualization";
-export {
-	ContainerDevtoolsFeature,
-	ContainerDevtoolsFeatureFlags,
-	DevtoolsFeature,
-	DevtoolsFeatureFlags,
-} from "./Features";
-export { IFluidDevtools } from "./IFluidDevtools";
-export { DevtoolsLogger } from "./DevtoolsLogger";
-export { FluidDevtoolsProps, initializeDevtools } from "./FluidDevtools";
-export {
+} from "./data-visualization/index.js";
+export { VisualNodeKind } from "./data-visualization/index.js";
+export type { ContainerDevtoolsFeatureFlags, DevtoolsFeatureFlags } from "./Features.js";
+export type { IFluidDevtools } from "./IFluidDevtools.js";
+export { createDevtoolsLogger, type IDevtoolsLogger } from "./DevtoolsLogger.js";
+export type { FluidDevtoolsProps } from "./FluidDevtools.js";
+export { initializeDevtools } from "./FluidDevtools.js";
+export type {
 	AudienceChangeLogEntry,
 	ConnectionStateChangeLogEntry,
 	LogEntry,
 	StateChangeLogEntry,
-} from "./Logs";
+} from "./Logs.js";
+export type {
+	IDevtoolsMessage,
+	IMessageRelay,
+	IMessageRelayEvents,
+	ISourcedDevtoolsMessage,
+	InboundHandlers,
+	MessageLoggingOptions,
+} from "./messaging/index.js";
 export {
 	AudienceSummary,
 	CloseContainer,
@@ -70,7 +83,9 @@ export {
 	ContainerList,
 	ContainerStateChange,
 	ContainerStateHistory,
+	DataEdit,
 	DataVisualization,
+	DevtoolsDisposed,
 	DevtoolsFeatures,
 	devtoolsMessageSource,
 	DisconnectContainer,
@@ -82,18 +97,12 @@ export {
 	GetDevtoolsFeatures,
 	GetRootDataVisualizations,
 	GetTelemetryHistory,
-	IDevtoolsMessage,
-	IMessageRelay,
-	IMessageRelayEvents,
-	ISourcedDevtoolsMessage,
 	handleIncomingMessage,
 	handleIncomingWindowMessage,
-	InboundHandlers,
 	isDevtoolsMessage,
-	MessageLoggingOptions,
-	postMessagesToWindow,
 	RootDataVisualizations,
 	TelemetryEvent,
 	TelemetryHistory,
-} from "./messaging";
-export { ITimestampedTelemetryEvent } from "./TelemetryMetadata";
+	SetUnsampledTelemetry,
+} from "./messaging/index.js";
+export type { ITimestampedTelemetryEvent } from "./TelemetryMetadata.js";

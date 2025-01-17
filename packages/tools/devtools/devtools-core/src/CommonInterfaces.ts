@@ -4,22 +4,34 @@
  */
 
 /**
- * Base interface used in message data for events targeting a particular debugger instance via
- * its Container ID.
+ * A key used to identify and differentiate Containers registered with the {@link @fluidframework/devtools-core#IFluidDevtools}.
  *
- * @internal
+ * @remarks Each Container registered with the Devtools must be assigned a unique `containerKey`.
+ *
+ * @example "Canvas Container"
+ *
+ * @beta
  */
-export interface HasContainerId {
+export type ContainerKey = string;
+
+/**
+ * Common interface for data associated with a particular Container registered with the Devtools.
+ *
+ * @sealed
+ * @system
+ * @beta
+ */
+export interface HasContainerKey {
 	/**
-	 * The ID of the Container whose metadata is being requested.
+	 * {@inheritDoc ContainerKey}
 	 */
-	containerId: string;
+	readonly containerKey: ContainerKey;
 }
 
 /**
- * A unique ID for a Fluid object.
+ * A unique ID for a Fluid object
  *
- * @public
+ * @internal
  */
 export type FluidObjectId = string;
 
@@ -31,7 +43,45 @@ export type FluidObjectId = string;
  */
 export interface HasFluidObjectId {
 	/**
-	 * The ID of the Fluid object (DDS) whose data is being requested.
+	 * The ID of the Fluid object (DDS) associated with data or a request.
 	 */
-	fluidObjectId: FluidObjectId;
+	readonly fluidObjectId: FluidObjectId;
 }
+
+/**
+ * Represents the type selection for an edit being applied to a Shared Object.
+ *
+ * @internal
+ */
+export const EditType = {
+	/**
+	 * Indicates that the data associated with an edit is or must be a `boolean`.
+	 */
+	Boolean: "boolean",
+
+	/**
+	 * Indicates that the data associated with an edit is or must be a `number`.
+	 */
+	Number: "number",
+
+	/**
+	 * Indicates that the data associated with an edit is or must be a `string`.
+	 */
+	String: "string",
+
+	/**
+	 * Indicates that the data associated with an edit is or must be a `undefined`.
+	 */
+	Undefined: "undefined",
+
+	/**
+	 * Indicates that the data associated with an edit is or must be a `null`.
+	 */
+	Null: "null",
+} as const;
+
+/**
+ * {@inheritDoc (EditType:variable)}
+ * @internal
+ */
+export type EditType = (typeof EditType)[keyof typeof EditType];

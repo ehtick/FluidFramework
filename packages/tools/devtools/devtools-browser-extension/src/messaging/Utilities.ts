@@ -3,39 +3,20 @@
  * Licensed under the MIT License.
  */
 
-import { ISourcedDevtoolsMessage, MessageLoggingOptions } from "@fluid-experimental/devtools-core";
+import type {
+	ISourcedDevtoolsMessage,
+	MessageLoggingOptions,
+} from "@fluidframework/devtools-core/internal";
 
-import { TypedPortConnection } from "./TypedPortConnection";
+import type { TypedPortConnection } from "./TypedPortConnection.js";
 
-function formatMessageForLogging(text: string, loggingOptions?: MessageLoggingOptions): string {
+function formatMessageForLogging(
+	text: string,
+	loggingOptions?: MessageLoggingOptions,
+): string {
 	const loggingPreamble =
 		loggingOptions?.context === undefined ? "" : `${loggingOptions.context}: `;
 	return `${loggingPreamble}${text}`;
-}
-
-/**
- * Relays the provided message to the window (globalThis).
- *
- * @remarks Thin wrapper to provide some message-wise type-safety, and to inject some automated logging.
- *
- * @internal
- */
-export function relayMessageToWindow<TMessage extends ISourcedDevtoolsMessage>(
-	message: TMessage,
-	messageSource: string,
-	loggingOptions?: MessageLoggingOptions,
-): void {
-	// TODO: remove loggingOptions once things settle.
-	if (loggingOptions !== undefined) {
-		console.debug(
-			formatMessageForLogging(
-				`Relaying message from "${messageSource}" to the window:`,
-				loggingOptions,
-			),
-			message,
-		);
-	}
-	window.postMessage(message, "*"); // TODO: verify target is okay
 }
 
 /**

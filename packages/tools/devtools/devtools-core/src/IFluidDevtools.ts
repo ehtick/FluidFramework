@@ -2,9 +2,11 @@
  * Copyright (c) Microsoft Corporation and contributors. All rights reserved.
  * Licensed under the MIT License.
  */
-import { IDisposable } from "@fluidframework/common-definitions";
 
-import { ContainerDevtoolsProps } from "./ContainerDevtools";
+import type { IDisposable } from "@fluidframework/core-interfaces";
+
+import type { ContainerKey } from "./CommonInterfaces.js";
+import type { ContainerDevtoolsProps } from "./ContainerDevtools.js";
 
 /**
  * Fluid Devtools. A single, global instance is used to generate and communicate stats associated with the general Fluid
@@ -17,9 +19,8 @@ import { ContainerDevtoolsProps } from "./ContainerDevtools";
  *
  * The lifetime of the associated singleton is bound by that of the Window (globalThis), and it will be automatically
  * disposed of on Window unload.
- * If you wish to dispose of it earlier, you may call its {@link @fluidframework/common-definitions#IDisposable.dispose} method.
- *
- * @public
+ * If you wish to dispose of it earlier, you may call its {@link @fluidframework/core-interfaces#IDisposable.dispose} method.
+ * @alpha
  */
 export interface IFluidDevtools extends IDisposable {
 	/**
@@ -28,14 +29,14 @@ export interface IFluidDevtools extends IDisposable {
 	 *
 	 * @remarks To remove the Container from the Devtools, call {@link IFluidDevtools.closeContainerDevtools}.
 	 *
-	 * @throws Will throw if devtools have already been registered for the specified Container ID.
+	 * @throws Will throw if devtools have already been registered for the specified {@link ContainerKey}.
 	 */
 	registerContainerDevtools(props: ContainerDevtoolsProps): void;
 
 	/**
-	 * Removes the Container with the specified ID from the Devtools.
+	 * Removes the Container with the specified {@link ContainerKey} from the Devtools.
 	 *
 	 * @remarks Will no-op if no such Container is registered.
 	 */
-	closeContainerDevtools(containerId: string): void;
+	closeContainerDevtools(containerKey: ContainerKey): void;
 }

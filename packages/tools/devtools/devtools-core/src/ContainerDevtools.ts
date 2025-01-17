@@ -3,22 +3,26 @@
  * Licensed under the MIT License.
  */
 
-import { IAudience, IContainer } from "@fluidframework/container-definitions";
-import { IFluidLoadable } from "@fluidframework/core-interfaces";
-import { IClient } from "@fluidframework/protocol-definitions";
+import type { IAudience } from "@fluidframework/container-definitions";
+import type { IContainer } from "@fluidframework/container-definitions/internal";
+import type { IFluidLoadable } from "@fluidframework/core-interfaces";
+import type { IClient } from "@fluidframework/driver-definitions";
 
-import { FluidObjectId } from "./CommonInterfaces";
-import { ContainerStateChangeKind } from "./Container";
-import { ContainerStateMetadata } from "./ContainerMetadata";
+import type { AudienceClientMetadata } from "./AudienceMetadata.js";
+import type { ContainerKey, FluidObjectId, HasContainerKey } from "./CommonInterfaces.js";
+import { ContainerStateChangeKind } from "./Container.js";
+import type { ContainerStateMetadata } from "./ContainerMetadata.js";
+import type { ContainerDevtoolsFeatureFlags } from "./Features.js";
+import type { IContainerDevtools } from "./IContainerDevtools.js";
+import type { AudienceChangeLogEntry, ConnectionStateChangeLogEntry } from "./Logs.js";
 import {
 	DataVisualizerGraph,
+	type FluidObjectNode,
+	type RootHandleNode,
+	type SharedObjectEdit,
+	defaultEditors,
 	defaultVisualizers,
-	FluidObjectNode,
-	RootHandleNode,
-	VisualizeSharedObject,
-} from "./data-visualization";
-import { IContainerDevtools } from "./IContainerDevtools";
-import { AudienceChangeLogEntry, ConnectionStateChangeLogEntry } from "./Logs";
+} from "./data-visualization/index.js";
 import {
 	AudienceSummary,
 	CloseContainer,
@@ -26,6 +30,7 @@ import {
 	ContainerDevtoolsFeatures,
 	ContainerStateChange,
 	ContainerStateHistory,
+	DataEdit,
 	DataVisualization,
 	DisconnectContainer,
 	GetAudienceSummary,
@@ -33,32 +38,24 @@ import {
 	GetContainerState,
 	GetDataVisualization,
 	GetRootDataVisualizations,
-	handleIncomingWindowMessage,
-	IDevtoolsMessage,
-	InboundHandlers,
-	ISourcedDevtoolsMessage,
-	MessageLoggingOptions,
-	postMessagesToWindow,
+	type IDevtoolsMessage,
+	type ISourcedDevtoolsMessage,
+	type InboundHandlers,
+	type MessageLoggingOptions,
 	RootDataVisualizations,
-} from "./messaging";
-import { AudienceClientMetadata } from "./AudienceMetadata";
-import { ContainerDevtoolsFeature, ContainerDevtoolsFeatureFlags } from "./Features";
+	handleIncomingWindowMessage,
+	postMessagesToWindow,
+} from "./messaging/index.js";
 
 /**
  * Properties for registering a {@link @fluidframework/container-definitions#IContainer} with the Devtools.
- *
- * @public
+ * @alpha
  */
-export interface ContainerDevtoolsProps {
+export interface ContainerDevtoolsProps extends HasContainerKey {
 	/**
 	 * The Container to register with the Devtools.
 	 */
 	container: IContainer;
-
-	/**
-	 * The ID of the {@link ContainerDevtoolsProps.container | Container}.
-	 */
-	containerId: string;
 
 	/**
 	 * (optional) Distributed Data Structures (DDSs) associated with the
@@ -75,32 +72,7 @@ export interface ContainerDevtoolsProps {
 	 */
 	containerData?: Record<string, IFluidLoadable>;
 
-	/**
-	 * (optional) Nickname for the {@link ContainerDevtoolsProps.container | Container} / debugger instance.
-	 *
-	 * @remarks
-	 *
-	 * Associated tooling may take advantage of this to differentiate between instances using
-	 * semantically meaningful information.
-	 *
-	 * If not provided, the {@link ContainerDevtoolsProps.containerId} will be used for the purpose of distinguishing
-	 * instances.
-	 */
-	containerNickname?: string;
-
-	/**
-	 * (optional) Configurations for generating visual representations of
-	 * {@link @fluidframework/shared-object-base#ISharedObject}s under {@link ContainerDevtoolsProps.containerData}.
-	 *
-	 * @remarks
-	 *
-	 * If not specified, then only `SharedObject` types natively known by the system will be visualized, and using
-	 * default visualization implementations.
-	 *
-	 * Any visualizer configurations specified here will take precedence over system defaults, as well as any
-	 * provided when initializing the Devtools.
-	 */
-	dataVisualizers?: Record<string, VisualizeSharedObject>;
+	// TODO: Add ability for customers to specify custom visualizer overrides
 }
 
 /**
@@ -111,7 +83,7 @@ export interface ContainerDevtoolsProps {
  * This class listens to incoming messages from the window (globalThis), and posts messages to it upon relevant
  * state changes and when requested.
  *
- * **Messages it listens for (if the {@link HasContainerId.containerId} matches):**
+ * **Messages it listens for (if the {@link HasContainerKey.containerKey} matches):**
  *
  * - {@link GetContainerDevtoolsFeatures.Message}: When received, {@link ContainerDevtoolsFeatures.Message} will be
  * posted in response.
@@ -134,8 +106,6 @@ export interface ContainerDevtoolsProps {
  *
  * - {@link GetDataVisualization.Message}: When received, {@link DataVisualization.Message} will be posted in response.
  *
- * TODO: Document others as they are added.
- *
  * **Messages it posts:**
  *
  * - {@link ContainerDevtoolsFeatures.Message}: Posted only when requested via {@link GetContainerDevtoolsFeatures.Message}.
@@ -151,37 +121,34 @@ export interface ContainerDevtoolsProps {
  * - {@link DataVisualization.Message}: Posted when requested via {@link GetDataVisualization.Message}, or when
  * a change has occurred on the associated DDS, reachable from the visualization graph.
  *
- * TODO: Document others as they are added.
- *
  * @sealed
  */
-export class ContainerDevtools implements IContainerDevtools {
+export class ContainerDevtools implements IContainerDevtools, HasContainerKey {
 	/**
-	 * {@inheritDoc IContainerDevtools.containerId}
+	 * {@inheritDoc HasContainerKey.containerKey}
 	 */
-	public readonly containerId: string;
+	public readonly containerKey: ContainerKey;
 
 	/**
-	 * {@inheritDoc IContainerDevtools.container}
+	 * The registered Container.
 	 */
 	public readonly container: IContainer;
 
 	/**
-	 * {@inheritDoc IContainerDevtools.audience}
+	 * The {@link ContainerDevtools.container}'s audience.
 	 */
 	public get audience(): IAudience {
 		return this.container.audience;
 	}
 
 	/**
-	 * {@inheritDoc IContainerDevtools.containerData}
+	 * Data contents of the Container.
+	 *
+	 * @remarks
+	 *
+	 * This map is assumed to be immutable. The devtools will not make any modifications to its contents.
 	 */
 	public readonly containerData?: Record<string, IFluidLoadable>;
-
-	/**
-	 * {@inheritDoc IContainerDevtools.containerNickname}
-	 */
-	public readonly containerNickname?: string;
 
 	// #region Accumulated log state
 
@@ -200,7 +167,7 @@ export class ContainerDevtools implements IContainerDevtools {
 	/**
 	 * Manages state visualization for {@link ContainerDevtools.containerData}, if any was provided.
 	 *
-	 * @remarks Will only be `undefined` if `containerData` was not provided, or if the debugger has been disposed.
+	 * @remarks Will only be `undefined` if `containerData` was not provided, or if the devtools has been disposed.
 	 */
 	private dataVisualizer: DataVisualizerGraph | undefined;
 
@@ -263,17 +230,20 @@ export class ContainerDevtools implements IContainerDevtools {
 		this._audienceChangeLog.push({
 			clientId,
 			client,
-			changeKind: "added",
+			changeKind: "joined",
 			timestamp: Date.now(),
 		});
 		this.postAudienceStateChange();
 	};
 
-	private readonly audienceMemberRemovedHandler = (clientId: string, client: IClient): void => {
+	private readonly audienceMemberRemovedHandler = (
+		clientId: string,
+		client: IClient,
+	): void => {
 		this._audienceChangeLog.push({
 			clientId,
 			client,
-			changeKind: "removed",
+			changeKind: "left",
 			timestamp: Date.now(),
 		});
 		this.postAudienceStateChange();
@@ -292,73 +262,82 @@ export class ContainerDevtools implements IContainerDevtools {
 	// #region Window event handlers
 
 	/**
-	 * Handlers for inbound messages related to the debugger.
+	 * Handlers for inbound messages related to the devtools.
 	 */
 	private readonly inboundMessageHandlers: InboundHandlers = {
-		[GetContainerDevtoolsFeatures.MessageType]: (untypedMessage) => {
+		[GetContainerDevtoolsFeatures.MessageType]: async (untypedMessage) => {
 			const message = untypedMessage as GetContainerDevtoolsFeatures.Message;
-			if (message.data.containerId === this.containerId) {
+			if (message.data.containerKey === this.containerKey) {
 				this.postSupportedFeatures();
 				return true;
 			}
 			return false;
 		},
-		[GetContainerState.MessageType]: (untypedMessage) => {
+		[GetContainerState.MessageType]: async (untypedMessage) => {
 			const message = untypedMessage as GetContainerState.Message;
-			if (message.data.containerId === this.containerId) {
+			if (message.data.containerKey === this.containerKey) {
 				this.postContainerStateChange();
 				return true;
 			}
 			return false;
 		},
-		[ConnectContainer.MessageType]: (untypedMessage) => {
+		[ConnectContainer.MessageType]: async (untypedMessage) => {
 			const message = untypedMessage as ConnectContainer.Message;
-			if (message.data.containerId === this.containerId) {
+			if (message.data.containerKey === this.containerKey) {
 				this.container.connect();
 				return true;
 			}
 			return false;
 		},
-		[DisconnectContainer.MessageType]: (untypedMessage) => {
+		[DisconnectContainer.MessageType]: async (untypedMessage) => {
 			const message = untypedMessage as DisconnectContainer.Message;
-			if (message.data.containerId === this.containerId) {
-				this.container.disconnect(/* TODO: Specify debugger reason here once it is supported */);
+			if (message.data.containerKey === this.containerKey) {
+				this.container.disconnect(
+					/* TODO: Specify devtools reason here once it is supported */
+				);
 				return true;
 			}
 			return false;
 		},
-		[CloseContainer.MessageType]: (untypedMessage) => {
+		[CloseContainer.MessageType]: async (untypedMessage) => {
 			const message = untypedMessage as CloseContainer.Message;
-			if (message.data.containerId === this.containerId) {
-				this.container.close(/* TODO: Specify debugger reason here once it is supported */);
+			if (message.data.containerKey === this.containerKey) {
+				this.container.close(/* TODO: Specify devtools reason here once it is supported */);
 				return true;
 			}
 			return false;
 		},
-		[GetAudienceSummary.MessageType]: (untypedMessage) => {
+		[GetAudienceSummary.MessageType]: async (untypedMessage) => {
 			const message = untypedMessage as GetAudienceSummary.Message;
-			if (message.data.containerId === this.containerId) {
+			if (message.data.containerKey === this.containerKey) {
 				this.postAudienceStateChange();
 				return true;
 			}
 			return false;
 		},
-		[GetRootDataVisualizations.MessageType]: (untypedMessage) => {
+		[GetRootDataVisualizations.MessageType]: async (untypedMessage) => {
 			const message = untypedMessage as GetRootDataVisualizations.Message;
-			if (message.data.containerId === this.containerId) {
-				this.getRootDataVisualizations().then((visualizations) => {
-					this.postRootDataVisualizations(visualizations);
-				}, console.error);
+			if (message.data.containerKey === this.containerKey) {
+				const visualizations = await this.getRootDataVisualizations();
+				this.postRootDataVisualizations(visualizations);
 				return true;
 			}
 			return false;
 		},
-		[GetDataVisualization.MessageType]: (untypedMessage) => {
+		[GetDataVisualization.MessageType]: async (untypedMessage) => {
 			const message = untypedMessage as GetDataVisualization.Message;
-			if (message.data.containerId === this.containerId) {
-				this.getDataVisualization(message.data.fluidObjectId).then((visualization) => {
-					this.postDataVisualization(message.data.fluidObjectId, visualization);
-				}, console.error);
+			if (message.data.containerKey === this.containerKey) {
+				const visualization = await this.getDataVisualization(message.data.fluidObjectId);
+				this.postDataVisualization(message.data.fluidObjectId, visualization);
+				return true;
+			}
+			return false;
+		},
+
+		[DataEdit.MessageType]: async (untypedMessage) => {
+			const message = untypedMessage as DataEdit.Message;
+			if (message.data.containerKey === this.containerKey) {
+				await this.editData(message.data.edit);
 				return true;
 			}
 			return false;
@@ -371,7 +350,11 @@ export class ContainerDevtools implements IContainerDevtools {
 	private readonly windowMessageHandler = (
 		event: MessageEvent<Partial<ISourcedDevtoolsMessage>>,
 	): void => {
-		handleIncomingWindowMessage(event, this.inboundMessageHandlers, this.messageLoggingOptions);
+		handleIncomingWindowMessage(
+			event,
+			this.inboundMessageHandlers,
+			this.messageLoggingOptions,
+		);
 	};
 
 	/**
@@ -383,7 +366,7 @@ export class ContainerDevtools implements IContainerDevtools {
 		postMessagesToWindow(
 			this.messageLoggingOptions,
 			ContainerDevtoolsFeatures.createMessage({
-				containerId: this.containerId,
+				containerKey: this.containerKey,
 				features: supportedFeatures,
 			}),
 		);
@@ -396,11 +379,11 @@ export class ContainerDevtools implements IContainerDevtools {
 		postMessagesToWindow<IDevtoolsMessage>(
 			this.messageLoggingOptions,
 			ContainerStateChange.createMessage({
-				containerId: this.containerId,
+				containerKey: this.containerKey,
 				containerState: this.getContainerState(),
 			}),
 			ContainerStateHistory.createMessage({
-				containerId: this.containerId,
+				containerKey: this.containerKey,
 				history: [...this._connectionStateLog],
 			}),
 		);
@@ -421,7 +404,7 @@ export class ContainerDevtools implements IContainerDevtools {
 		postMessagesToWindow(
 			this.messageLoggingOptions,
 			AudienceSummary.createMessage({
-				containerId: this.containerId,
+				containerKey: this.containerKey,
 				clientId: this.container.clientId,
 				audienceState: audienceClientMetadata,
 				audienceHistory: this.getAudienceHistory(),
@@ -435,7 +418,7 @@ export class ContainerDevtools implements IContainerDevtools {
 		postMessagesToWindow(
 			this.messageLoggingOptions,
 			RootDataVisualizations.createMessage({
-				containerId: this.containerId,
+				containerKey: this.containerKey,
 				visualizations,
 			}),
 		);
@@ -448,7 +431,7 @@ export class ContainerDevtools implements IContainerDevtools {
 		postMessagesToWindow(
 			this.messageLoggingOptions,
 			DataVisualization.createMessage({
-				containerId: this.containerId,
+				containerKey: this.containerKey,
 				fluidObjectId,
 				visualization,
 			}),
@@ -458,10 +441,10 @@ export class ContainerDevtools implements IContainerDevtools {
 	// #endregion
 
 	/**
-	 * Message logging options used by the debugger.
+	 * Message logging options used by the devtools.
 	 */
 	private get messageLoggingOptions(): MessageLoggingOptions {
-		return { context: `Container Devtools (${this.containerId})` };
+		return { context: `Container Devtools (${this.containerKey})` };
 	}
 
 	/**
@@ -474,22 +457,19 @@ export class ContainerDevtools implements IContainerDevtools {
 	private _disposed: boolean;
 
 	public constructor(props: ContainerDevtoolsProps) {
-		this.containerId = props.containerId;
+		this.containerKey = props.containerKey;
 		this.containerData = props.containerData;
 		this.container = props.container;
-		this.containerNickname = props.containerNickname;
 
-		// TODO: would it be useful to log the states (and timestamps) at time of debugger initialize?
+		// TODO: would it be useful to log the states (and timestamps) at time of devtools initialize?
 		this._connectionStateLog = [];
 		this._audienceChangeLog = [];
 
 		this.dataVisualizer =
 			props.containerData === undefined
 				? undefined
-				: new DataVisualizerGraph(props.containerData, {
-						...defaultVisualizers,
-						...props.dataVisualizers, // User-specified visualizers take precedence over system defaults
-				  });
+				: new DataVisualizerGraph(props.containerData, defaultVisualizers, defaultEditors);
+
 		this.dataVisualizer?.on("update", this.dataUpdateHandler);
 
 		// Bind Container events required for change-logging
@@ -552,7 +532,7 @@ export class ContainerDevtools implements IContainerDevtools {
 	}
 
 	/**
-	 * {@inheritDoc @fluidframework/common-definitions#IDisposable.disposed}
+	 * {@inheritDoc @fluidframework/core-interfaces#IDisposable.disposed}
 	 */
 	public get disposed(): boolean {
 		return this._disposed;
@@ -563,7 +543,11 @@ export class ContainerDevtools implements IContainerDevtools {
 	 */
 	private getSupportedFeatures(): ContainerDevtoolsFeatureFlags {
 		return {
-			[ContainerDevtoolsFeature.ContainerData]: this.containerData !== undefined,
+			// If no container data was provided to the devtools, we cannot support data visualization.
+			containerDataVisualization: this.containerData !== undefined,
+
+			// TODO: When ready to enable feature set it to this.containerData !== undefined
+			containerDataEditing: false,
 		};
 	}
 
@@ -573,18 +557,18 @@ export class ContainerDevtools implements IContainerDevtools {
 	private getContainerState(): ContainerStateMetadata {
 		const clientId = this.container.clientId;
 		return {
-			id: this.containerId,
-			nickname: this.containerNickname,
+			containerKey: this.containerKey,
 			attachState: this.container.attachState,
 			connectionState: this.container.connectionState,
 			closed: this.container.closed,
 			clientId: this.container.clientId,
-			audienceId:
-				clientId === undefined ? undefined : this.audience.getMember(clientId)?.user.id,
+			userId: clientId === undefined ? undefined : this.audience.getMember(clientId)?.user.id,
 		};
 	}
 
-	private async getRootDataVisualizations(): Promise<Record<string, RootHandleNode> | undefined> {
+	private async getRootDataVisualizations(): Promise<
+		Record<string, RootHandleNode> | undefined
+	> {
 		return this.dataVisualizer?.renderRootHandles() ?? undefined;
 	}
 
@@ -592,5 +576,12 @@ export class ContainerDevtools implements IContainerDevtools {
 		fluidObjectId: FluidObjectId,
 	): Promise<FluidObjectNode | undefined> {
 		return this.dataVisualizer?.render(fluidObjectId) ?? undefined;
+	}
+
+	/**
+	 * Applies an {@link Edit} to a {@link SharedObject}
+	 */
+	private async editData(edit: SharedObjectEdit): Promise<void> {
+		return this.dataVisualizer?.applyEdit(edit);
 	}
 }

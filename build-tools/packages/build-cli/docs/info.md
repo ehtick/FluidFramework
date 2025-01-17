@@ -11,13 +11,20 @@ Get info about the repo, release groups, and packages.
 
 ```
 USAGE
-  $ flub info [-v] [-g client|server|azure|build-tools|gitrest|historian] [-p] [--json]
+  $ flub info [--json] [-v | --quiet] [-g client|server|azure|build-tools|gitrest|historian] [-c
+    releaseGroup|name|private|version|path...] [-p]
 
 FLAGS
-  -g, --releaseGroup=<option>  Name of the release group
+  -c, --columns=<option>...    [default: releaseGroup,name,private,version] Specify which columns are included in
+                               report.
+                               <options: releaseGroup|name|private|version|path>
+  -g, --releaseGroup=<option>  Name of a release group.
                                <options: client|server|azure|build-tools|gitrest|historian>
   -p, --[no-]private           Include private packages (default true).
-  -v, --verbose                Verbose logging.
+
+LOGGING FLAGS
+  -v, --verbose  Enable verbose logging.
+      --quiet    Disable all logging.
 
 GLOBAL FLAGS
   --json  Format output as json.

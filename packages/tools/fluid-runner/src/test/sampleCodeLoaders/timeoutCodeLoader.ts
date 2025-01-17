@@ -6,21 +6,15 @@
 import {
 	ICodeDetailsLoader,
 	IContainer,
-	IFluidModuleWithDetails,
-} from "@fluidframework/container-definitions";
-import { BaseContainerRuntimeFactory } from "@fluidframework/aqueduct";
-import { ITelemetryBaseLogger } from "@fluidframework/common-definitions";
-import { IFluidFileConverter } from "../../codeLoaderBundle";
+} from "@fluidframework/container-definitions/internal";
+import { ITelemetryBaseLogger } from "@fluidframework/core-interfaces";
+
+import { IFluidFileConverter } from "../../codeLoaderBundle.js";
+
+import { SampleCodeLoader } from "./sampleCodeLoader.js";
 
 async function getCodeLoader(_logger: ITelemetryBaseLogger): Promise<ICodeDetailsLoader> {
-	return {
-		load: async (): Promise<IFluidModuleWithDetails> => {
-			return {
-				module: { fluidExport: new BaseContainerRuntimeFactory(new Map()) },
-				details: { package: "no-dynamic-package", config: {} },
-			};
-		},
-	};
+	return new SampleCodeLoader();
 }
 
 export const executeResult = "result";

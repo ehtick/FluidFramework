@@ -6,14 +6,14 @@
 // TODOs:
 // - Better documentation terminology WRT "inbound" vs "outbound" events.
 //   - Since the types and utilities are re-used between the packages, these should be documented in
-//     explicit terms of the debugger to/from external consumer.
+//     explicit terms of the devtools to/from external consumer.
 
 /**
  * This directory contains types and utilities for use in window-based messaging, used
- * by the Fluid Client Debugger.
+ * by the Fluid Devtools.
  */
 
-export { devtoolsMessageSource } from "./Constants";
+export { devtoolsMessageSource } from "./Constants.js";
 export {
 	AudienceSummary,
 	CloseContainer,
@@ -21,6 +21,7 @@ export {
 	ContainerDevtoolsFeatures,
 	ContainerStateChange,
 	ContainerStateHistory,
+	DataEdit,
 	DataVisualization,
 	DisconnectContainer,
 	GetAudienceSummary,
@@ -29,21 +30,26 @@ export {
 	GetDataVisualization,
 	GetRootDataVisualizations,
 	RootDataVisualizations,
-} from "./container-devtools-messages";
+} from "./container-devtools-messages/index.js";
 export {
 	ContainerList,
+	DevtoolsDisposed,
 	DevtoolsFeatures,
 	GetContainerList,
 	GetDevtoolsFeatures,
-} from "./devtools-messages";
-export { ISourcedDevtoolsMessage, IDevtoolsMessage } from "./Messages";
-export { IMessageRelay, IMessageRelayEvents } from "./MessageRelay";
-export { GetTelemetryHistory, TelemetryEvent, TelemetryHistory } from "./telemetry-messages";
+	SetUnsampledTelemetry,
+} from "./devtools-messages/index.js";
+export type { ISourcedDevtoolsMessage, IDevtoolsMessage } from "./Messages.js";
+export type { IMessageRelay, IMessageRelayEvents } from "./MessageRelay.js";
+export {
+	GetTelemetryHistory,
+	TelemetryEvent,
+	TelemetryHistory,
+} from "./telemetry-messages/index.js";
+export type { InboundHandlers, MessageLoggingOptions } from "./Utilities.js";
 export {
 	handleIncomingMessage,
 	handleIncomingWindowMessage,
-	InboundHandlers,
 	isDevtoolsMessage,
-	MessageLoggingOptions,
 	postMessagesToWindow,
-} from "./Utilities";
+} from "./Utilities.js";

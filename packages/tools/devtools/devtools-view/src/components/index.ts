@@ -3,25 +3,25 @@
  * Licensed under the MIT License.
  */
 
-// TODO: re-enable rule and fix violations
+// All of the components in this directory are intended to be used within this package,
+// so we will export * here
 /* eslint-disable no-restricted-syntax */
 
-export * from "./client-data-views";
+export * from "./data-visualization/index.js";
 
-export * from "./AudienceView";
-export * from "./ContainerDevtoolsView";
-export * from "./ContainerHistoryView";
-export * from "./ContainerSummaryView";
-export * from "./FluidHandleView";
-export * from "./FluidTreeView";
-export * from "./FluidValueView";
-export * from "./LandingView";
-export * from "./Menu";
-export * from "./TelemetryView";
-export * from "./TreeView";
-export * from "./UnknownDataView";
-export * from "./UnknownFluidObjectView";
-export * from "./ValueView";
-export * from "./Waiting";
+export * from "./AudienceHistoryTable.js";
+export * from "./AudienceStateTable.js";
+export * from "./AudienceView.js";
+export * from "./ContainerDevtoolsView.js";
+export * from "./ContainerHistoryView.js";
+export * from "./ContainerSummaryView.js";
+export * from "./LandingView.js";
+export * from "./Menu.js";
+export * from "./NoDevtoolsErrorBar.js";
+export * from "./OpLatencyView.js";
+export * from "./SettingsView.js";
+export * from "./TelemetryConsentModal.js";
+export * from "./TelemetryView.js";
+export * from "./Waiting.js";
 
 /* eslint-enable no-restricted-syntax */

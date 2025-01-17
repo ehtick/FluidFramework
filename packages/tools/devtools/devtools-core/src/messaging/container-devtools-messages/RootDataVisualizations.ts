@@ -3,9 +3,9 @@
  * Licensed under the MIT License.
  */
 
-import { HasContainerId } from "../../CommonInterfaces";
-import { RootHandleNode } from "../../data-visualization";
-import { IDevtoolsMessage } from "../Messages";
+import type { HasContainerKey } from "../../CommonInterfaces.js";
+import type { RootHandleNode } from "../../data-visualization/index.js";
+import type { IDevtoolsMessage } from "../Messages.js";
 
 /**
  * Encapsulates types and logic related to {@link RootDataVisualizations.Message}.
@@ -25,7 +25,7 @@ export namespace RootDataVisualizations {
 	 *
 	 * @internal
 	 */
-	export interface MessageData extends HasContainerId {
+	export interface MessageData extends HasContainerKey {
 		/**
 		 * List of root Fluid objects.
 		 *

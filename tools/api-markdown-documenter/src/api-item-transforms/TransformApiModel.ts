@@ -2,49 +2,45 @@
  * Copyright (c) Microsoft Corporation and contributors. All rights reserved.
  * Licensed under the MIT License.
  */
-import { ApiEntryPoint, ApiItem, ApiModel, ApiPackage } from "@microsoft/api-extractor-model";
 
-import { DocumentNode, SectionNode } from "../documentation-domain";
-import { createDocument } from "./Utilities";
 import {
-	ApiItemTransformationConfiguration,
+	ApiItemKind,
+	type ApiEntryPoint,
+	type ApiItem,
+	type ApiModel,
+	type ApiPackage,
+} from "@microsoft/api-extractor-model";
+
+import type { DocumentNode, SectionNode } from "../documentation-domain/index.js";
+
+import { doesItemRequireOwnDocument, shouldItemBeIncluded } from "./ApiItemTransformUtilities.js";
+import { apiItemToDocument, apiItemToSections } from "./TransformApiItem.js";
+import { checkForDuplicateDocumentPaths, createDocument } from "./Utilities.js";
+import {
+	type ApiItemTransformationConfiguration,
+	type ApiItemTransformationOptions,
 	getApiItemTransformationConfigurationWithDefaults,
-} from "./configuration";
-import { doesItemRequireOwnDocument } from "./ApiItemUtilities";
-import { createBreadcrumbParagraph, createEntryPointList, wrapInSection } from "./helpers";
-import { apiItemToDocument, apiItemToSections } from "./TransformApiItem";
+} from "./configuration/index.js";
+import { createBreadcrumbParagraph, createEntryPointList, wrapInSection } from "./helpers/index.js";
 
 /**
  * Renders the provided model and its contents to a series of {@link DocumentNode}s.
  *
- * @remarks
- *
- * Which API members get their own documents and which get written to the contents of their parent is
- * determined by {@link DocumentationSuiteOptions.documentBoundaries}.
- *
- * The generated nodes' {@link DocumentNode.filePath}s are determined by the provided output path and the
- * following configuration properties:
- *
- * - {@link DocumentationSuiteOptions.documentBoundaries}
- * - {@link DocumentationSuiteOptions.hierarchyBoundaries}
- *
- * @param transformConfig - Configuration for transforming API items into {@link DocumentationNode}s.
+ * @public
  */
-export function transformApiModel(
-	transformConfig: ApiItemTransformationConfiguration,
-): DocumentNode[] {
-	const config = getApiItemTransformationConfigurationWithDefaults(transformConfig);
+export function transformApiModel(options: ApiItemTransformationOptions): DocumentNode[] {
+	const config = getApiItemTransformationConfigurationWithDefaults(options);
 	const { apiModel, logger, skipPackage } = config;
 
-	logger.info(`Generating Markdown documentation for API Model ${apiModel.displayName}...`);
+	logger.verbose(`Generating documentation for API Model...`);
 
 	// If a package has multiple entry-points, it's possible for the same API item to appear under more than one
 	// entry-point (i.e., we are traversing a graph, rather than a tree).
 	// To avoid redundant computation, we will keep a ledger of which API items we have transformed.
-	const documents: Map<ApiItem, DocumentNode> = new Map<ApiItem, DocumentNode>();
+	const documentsMap: Map<ApiItem, DocumentNode> = new Map<ApiItem, DocumentNode>();
 
 	// Always render Model document (this is the "root" of the generated documentation suite).
-	documents.set(apiModel, createDocumentForApiModel(apiModel, config));
+	documentsMap.set(apiModel, createDocumentForApiModel(apiModel, config));
 
 	const packages = apiModel.packages;
 
@@ -79,42 +75,49 @@ export function transformApiModel(
 
 			const entryPoint = packageEntryPoints[0];
 
-			documents.set(
+			documentsMap.set(
 				packageItem,
 				createDocumentForSingleEntryPointPackage(packageItem, entryPoint, config),
 			);
 
 			const packageDocumentItems = getDocumentItems(entryPoint, config);
 			for (const apiItem of packageDocumentItems) {
-				if (!documents.has(apiItem)) {
-					documents.set(apiItem, apiItemToDocument(apiItem, config));
+				if (!documentsMap.has(apiItem)) {
+					documentsMap.set(apiItem, apiItemToDocument(apiItem, config));
 				}
 			}
 		} else {
 			// If a package contains multiple entry-points, we will generate a separate document for each.
 			// The package-level document will enumerate the entry-points.
 
-			documents.set(
+			documentsMap.set(
 				packageItem,
 				createDocumentForMultiEntryPointPackage(packageItem, packageEntryPoints, config),
 			);
 
 			for (const entryPoint of packageEntryPoints) {
-				documents.set(entryPoint, createDocumentForApiEntryPoint(entryPoint, config));
+				documentsMap.set(entryPoint, createDocumentForApiEntryPoint(entryPoint, config));
 
 				const packageDocumentItems = getDocumentItems(entryPoint, config);
 				for (const apiItem of packageDocumentItems) {
-					if (!documents.has(apiItem)) {
-						documents.set(apiItem, apiItemToDocument(apiItem, config));
+					if (!documentsMap.has(apiItem)) {
+						documentsMap.set(apiItem, apiItemToDocument(apiItem, config));
 					}
 				}
 			}
 		}
 	}
 
-	logger.success("Documents generated!");
+	const documents = [...documentsMap.values()];
 
-	return [...documents.values()];
+	try {
+		checkForDuplicateDocumentPaths(documents);
+	} catch (error: unknown) {
+		logger.warning((error as Error).message);
+	}
+
+	logger.success("API Model documents generated!");
+	return documents;
 }
 
 /**
@@ -123,15 +126,15 @@ export function transformApiModel(
  * @param apiItem - The API item in question.
  * @param config - See {@link ApiItemTransformationConfiguration}
  */
-function getDocumentItems(
-	apiItem: ApiItem,
-	config: Required<ApiItemTransformationConfiguration>,
-): ApiItem[] {
-	const { documentBoundaries } = config;
+function getDocumentItems(apiItem: ApiItem, config: ApiItemTransformationConfiguration): ApiItem[] {
+	const { hierarchy } = config;
 
 	const result: ApiItem[] = [];
 	for (const childItem of apiItem.members) {
-		if (doesItemRequireOwnDocument(childItem, documentBoundaries)) {
+		if (
+			shouldItemBeIncluded(childItem, config) &&
+			doesItemRequireOwnDocument(childItem, hierarchy)
+		) {
 			result.push(childItem);
 		}
 		result.push(...getDocumentItems(childItem, config));
@@ -149,16 +152,16 @@ function getDocumentItems(
  */
 function createDocumentForApiModel(
 	apiModel: ApiModel,
-	config: Required<ApiItemTransformationConfiguration>,
+	config: ApiItemTransformationConfiguration,
 ): DocumentNode {
-	const { logger, transformApiModel: createModelBodySections } = config;
+	const { logger, transformations } = config;
 
 	logger.verbose(`Generating API Model document...`);
 
-	// Note: We don't render the breadcrumb for Model document, as it is always the root of the file hierarchical
+	// Note: We don't render the breadcrumb for Model document, as it is always the root of the file hierarchy.
 
 	// Render body contents
-	const sections = createModelBodySections(apiModel, config);
+	const sections = transformations[ApiItemKind.Model](apiModel, config);
 
 	logger.verbose(`API Model document rendered successfully.`);
 
@@ -180,9 +183,9 @@ function createDocumentForApiModel(
 function createDocumentForSingleEntryPointPackage(
 	apiPackage: ApiPackage,
 	apiEntryPoint: ApiEntryPoint,
-	config: Required<ApiItemTransformationConfiguration>,
+	config: ApiItemTransformationConfiguration,
 ): DocumentNode {
-	const { includeBreadcrumb, logger, transformApiEntryPoint } = config;
+	const { includeBreadcrumb, logger, transformations } = config;
 
 	logger.verbose(`Generating ${apiPackage.name} package document...`);
 
@@ -194,12 +197,15 @@ function createDocumentForSingleEntryPointPackage(
 	}
 
 	// Render sub-sections for the single entry-point. We will bundle these with body comments from the package item.
-	const entryPointSections = transformApiEntryPoint(apiEntryPoint, config, (childItem) =>
-		apiItemToSections(childItem, config),
+	const entryPointSections = transformations[ApiItemKind.EntryPoint](
+		apiEntryPoint,
+		config,
+		(childItem) => apiItemToSections(childItem, config),
 	);
 
 	// Wrap entry-point contents with package-level docs
-	sections.push(...config.createChildContentSections(apiPackage, entryPointSections, config));
+	// TODO: Make package transformation configurable
+	sections.push(...config.defaultSectionLayout(apiPackage, entryPointSections, config));
 
 	logger.verbose(`Package document rendered successfully.`);
 
@@ -220,7 +226,7 @@ function createDocumentForSingleEntryPointPackage(
 function createDocumentForMultiEntryPointPackage(
 	apiPackage: ApiPackage,
 	apiEntryPoints: readonly ApiEntryPoint[],
-	config: Required<ApiItemTransformationConfiguration>,
+	config: ApiItemTransformationConfiguration,
 ): DocumentNode {
 	const { includeBreadcrumb, logger } = config;
 
@@ -233,7 +239,7 @@ function createDocumentForMultiEntryPointPackage(
 		sections.push(wrapInSection([createBreadcrumbParagraph(apiPackage, config)]));
 	}
 
-	// Render list of entry-points
+	// Render list of links to entry-points, each of which will get its own document.
 	const renderedEntryPointList = createEntryPointList(apiEntryPoints, config);
 	if (renderedEntryPointList !== undefined) {
 		sections.push(
@@ -250,9 +256,9 @@ function createDocumentForMultiEntryPointPackage(
 
 function createDocumentForApiEntryPoint(
 	apiEntryPoint: ApiEntryPoint,
-	config: Required<ApiItemTransformationConfiguration>,
+	config: ApiItemTransformationConfiguration,
 ): DocumentNode {
-	const { includeBreadcrumb, logger, transformApiEntryPoint } = config;
+	const { includeBreadcrumb, logger, transformations } = config;
 
 	logger.verbose(`Generating ${apiEntryPoint.displayName} API entry-point document...`);
 
@@ -265,7 +271,7 @@ function createDocumentForApiEntryPoint(
 
 	// Render body contents
 	sections.push(
-		...transformApiEntryPoint(apiEntryPoint, config, (childItem) =>
+		...transformations[ApiItemKind.EntryPoint](apiEntryPoint, config, (childItem) =>
 			apiItemToSections(childItem, config),
 		),
 	);

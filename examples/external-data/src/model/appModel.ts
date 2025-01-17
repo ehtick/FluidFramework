@@ -3,12 +3,12 @@
  * Licensed under the MIT License.
  */
 
-import { TypedEventEmitter } from "@fluidframework/common-utils";
-import { IContainer } from "@fluidframework/container-definitions";
-import { IContainerRuntime } from "@fluidframework/container-runtime-definitions";
-import { IFluidResolvedUrl } from "@fluidframework/driver-definitions";
+import { TypedEventEmitter } from "@fluid-internal/client-utils";
+import { IContainer } from "@fluidframework/container-definitions/legacy";
+import { IContainerRuntime } from "@fluidframework/container-runtime-definitions/legacy";
+import { IResolvedUrl } from "@fluidframework/driver-definitions/legacy";
 
-import type { IAppModel, IAppModelEvents, IBaseDocument } from "../model-interface";
+import type { IAppModel, IAppModelEvents, IBaseDocument } from "../model-interface/index.js";
 
 /**
  * In this demo, the AppModel just needs to hold the taskList.  In a real scenario, this may have further
@@ -22,16 +22,6 @@ export class AppModel extends TypedEventEmitter<IAppModelEvents> implements IApp
 	) {
 		super();
 	}
-
-	/**
-	 * {@inheritDoc IAppModel.sendCustomDebugSignal}
-	 */
-	public readonly sendCustomDebugSignal = (): void => {
-		this.runtime.submitSignal("debugSignal", {
-			type: "ExternalDataChange",
-			taskListId: "task-list-1",
-		});
-	};
 
 	/**
 	 * {@inheritDoc IAppModel.getClientId}
@@ -54,7 +44,7 @@ export class AppModel extends TypedEventEmitter<IAppModelEvents> implements IApp
 	/**
 	 * {@inheritDoc IAppModel.getContainerResolvedUrl}
 	 */
-	public readonly getContainerResolvedUrl = (): IFluidResolvedUrl | undefined => {
-		return this.container?.resolvedUrl as IFluidResolvedUrl;
+	public readonly getContainerResolvedUrl = (): IResolvedUrl | undefined => {
+		return this.container?.resolvedUrl;
 	};
 }

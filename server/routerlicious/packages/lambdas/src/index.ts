@@ -3,7 +3,12 @@
  * Licensed under the MIT License.
  */
 
-export { configureWebSocketServices } from "./alfred";
+export {
+	configureWebSocketServices,
+	IBroadcastSignalEventPayload,
+	ICollaborationSessionEvents,
+	IRoom,
+} from "./nexus";
 export { BroadcasterLambda, BroadcasterLambdaFactory } from "./broadcaster";
 export { CopierLambda, CopierLambdaFactory } from "./copier";
 export {
@@ -31,6 +36,7 @@ export {
 } from "./scribe";
 export { ScriptoriumLambda, ScriptoriumLambdaFactory } from "./scriptorium";
 export {
+	circuitBreakerOptions,
 	createNackMessage,
 	createRoomJoinMessage,
 	createRoomLeaveMessage,
@@ -38,6 +44,10 @@ export {
 	generateClientId,
 	isDocumentSessionValid,
 	isDocumentValid,
+	IRuntimeSignalEnvelope,
+	LambdaCircuitBreaker,
 	logCommonSessionEndMetrics,
 	NoOpLambda,
+	NoOpLambdaCheckpointConfiguration,
+	DocumentCheckpointManager,
 } from "./utils";

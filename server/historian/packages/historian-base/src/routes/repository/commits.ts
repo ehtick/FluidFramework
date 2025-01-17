@@ -3,38 +3,43 @@
  * Licensed under the MIT License.
  */
 
-import { AsyncLocalStorage } from "async_hooks";
 import * as git from "@fluidframework/gitresources";
 import {
 	IStorageNameRetriever,
 	IThrottler,
-	ITokenRevocationManager,
+	IRevokedTokenChecker,
+	IDocumentManager,
 } from "@fluidframework/server-services-core";
+import { IThrottleMiddlewareOptions, throttle } from "@fluidframework/server-services-utils";
 import {
-	IThrottleMiddlewareOptions,
-	throttle,
-	getParam,
-} from "@fluidframework/server-services-utils";
+	containsPathTraversal,
+	validateRequestParams,
+} from "@fluidframework/server-services-shared";
 import { Router } from "express";
 import * as nconf from "nconf";
 import winston from "winston";
-import { ICache, ITenantService } from "../../services";
+import { ICache, IDenyList, ITenantService, ISimplifiedCustomDataRetriever } from "../../services";
 import * as utils from "../utils";
 import { Constants } from "../../utils";
+import { NetworkError } from "@fluidframework/server-services-client";
 
 export function create(
 	config: nconf.Provider,
 	tenantService: ITenantService,
-	storageNameRetriever: IStorageNameRetriever,
+	storageNameRetriever: IStorageNameRetriever | undefined,
 	restTenantThrottlers: Map<string, IThrottler>,
+	restClusterThrottlers: Map<string, IThrottler>,
+	documentManager: IDocumentManager,
 	cache?: ICache,
-	asyncLocalStorage?: AsyncLocalStorage<string>,
-	tokenRevocationManager?: ITokenRevocationManager,
+	revokedTokenChecker?: IRevokedTokenChecker,
+	denyList?: IDenyList,
+	ephemeralDocumentTTLSec?: number,
+	simplifiedCustomDataRetriever?: ISimplifiedCustomDataRetriever,
 ): Router {
 	const router: Router = Router();
 
 	const tenantThrottleOptions: Partial<IThrottleMiddlewareOptions> = {
-		throttleIdPrefix: (req) => getParam(req.params, "tenantId"),
+		throttleIdPrefix: (req) => req.params.tenantId,
 		throttleIdSuffix: Constants.historianRestThrottleIdSuffix,
 	};
 	const restTenantGeneralThrottler = restTenantThrottlers.get(
@@ -43,32 +48,54 @@ export function create(
 
 	async function getCommits(
 		tenantId: string,
-		authorization: string,
+		authorization: string | undefined,
 		sha: string,
-		count: number,
+		count: number = 1,
 	): Promise<git.ICommitDetails[]> {
+		if (sha === undefined) {
+			throw new NetworkError(400, "Missing required parameter 'sha'");
+		}
 		const service = await utils.createGitService({
 			config,
 			tenantId,
 			authorization,
 			tenantService,
 			storageNameRetriever,
+			documentManager,
 			cache,
-			asyncLocalStorage,
+			denyList,
+			ephemeralDocumentTTLSec,
 		});
 		return service.getCommits(sha, count);
 	}
 
 	router.get(
 		"/repos/:ignored?/:tenantId/commits",
-		utils.validateRequestParams("sha"),
+		validateRequestParams("tenantId"),
 		throttle(restTenantGeneralThrottler, winston, tenantThrottleOptions),
-		utils.verifyTokenNotRevoked(tokenRevocationManager),
+		utils.verifyToken(revokedTokenChecker),
 		(request, response, next) => {
+			const sha = utils.queryParamToString(request.query.sha);
+			if (sha === undefined) {
+				utils.handleResponse(
+					Promise.reject(new NetworkError(400, "Missing required parameter 'sha'")),
+					response,
+					false,
+				);
+				return;
+			}
+			if (containsPathTraversal(sha)) {
+				utils.handleResponse(
+					Promise.reject(new NetworkError(400, "Invalid sha")),
+					response,
+					false,
+				);
+				return;
+			}
 			const commitsP = getCommits(
 				request.params.tenantId,
 				request.get("Authorization"),
-				utils.queryParamToString(request.query.sha),
+				sha,
 				utils.queryParamToNumber(request.query.count),
 			);
 

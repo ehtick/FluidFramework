@@ -3,18 +3,47 @@
  * Licensed under the MIT License.
  */
 
-import React from "react";
 import {
-	tokens,
+	Table,
 	TableBody,
 	TableCell,
-	TableRow,
-	Table,
 	TableHeader,
-	TableHeaderCell,
+	TableRow,
+	makeStyles,
+	tokens,
 } from "@fluentui/react-components";
-import { Clock20Regular, DoorArrowLeft24Regular, Person24Regular } from "@fluentui/react-icons";
-import { TransformedAudienceHistoryData } from "./AudienceView";
+import {
+	ArrowExitRegular,
+	ArrowJoinRegular,
+	Clock12Regular,
+	DoorArrowLeftRegular,
+	Person12Regular,
+} from "@fluentui/react-icons";
+import React from "react";
+
+import { ThemeOption, useThemeContext } from "../ThemeHelper.js";
+
+import type { TransformedAudienceHistoryData } from "./AudienceView.js";
+import { clientIdTooltipText } from "./TooltipTexts.js";
+import { LabelCellLayout } from "./utility-components/index.js";
+
+const audienceStyles = makeStyles({
+	joined: {
+		backgroundColor: tokens.colorPaletteRoyalBlueBackground2,
+	},
+	left: {
+		backgroundColor: tokens.colorPaletteRedBackground2,
+	},
+	highContrast: {
+		"color": "#FFF",
+		"&:hover": {
+			"color": "#000",
+			"& *": {
+				color: "#000",
+			},
+		},
+	},
+});
 
 /**
  * Represents audience history data filtered to the attributes that will be displayed in the history table.
@@ -29,9 +58,14 @@ export interface AudienceHistoryTableProps {
 
 /**
  * Renders audience history data of user status event, clientId & timestamp.
+ *
+ * @remarks {@link ThemeContext} must be set in order to use this component.
  */
 export function AudienceHistoryTable(props: AudienceHistoryTableProps): React.ReactElement {
 	const { audienceHistoryItems } = props;
+	const { themeInfo } = useThemeContext();
+
+	const style = audienceStyles();
 
 	// Columns for rendering audience history
 	const audienceHistoryColumns = [
@@ -41,31 +75,57 @@ export function AudienceHistoryTable(props: AudienceHistoryTableProps): React.Re
 	];
 
 	return (
-		<Table size="small" aria-label="Audience history table">
+		<Table size="extra-small" aria-label="Audience history table">
 			<TableHeader>
 				<TableRow>
 					{audienceHistoryColumns.map((column, columnIndex) => (
-						<TableHeaderCell key={columnIndex}>
-							{column.columnKey === "event" && <DoorArrowLeft24Regular />}
-							{column.columnKey === "clientId" && <Person24Regular />}
-							{column.columnKey === "time" && <Clock20Regular />}
-							{column.label}
-						</TableHeaderCell>
+						// TODO: Replace TableCell with TableHeaderCell once https://github.com/microsoft/fluentui/issues/31588 is fixed.
+						<TableCell key={columnIndex}>
+							{column.columnKey === "event" && (
+								<LabelCellLayout icon={<DoorArrowLeftRegular />}>
+									{column.label}
+								</LabelCellLayout>
+							)}
+
+							{column.columnKey === "clientId" && (
+								<LabelCellLayout
+									icon={<Person12Regular />}
+									aria-label="Client ID"
+									infoTooltipContent={clientIdTooltipText}
+								>
+									{column.label}
+								</LabelCellLayout>
+							)}
+							{column.columnKey === "time" && (
+								<LabelCellLayout icon={<Clock12Regular />}>{column.label}</LabelCellLayout>
+							)}
+						</TableCell>
 					))}
 				</TableRow>
 			</TableHeader>
 			<TableBody>
 				{audienceHistoryItems.map((item, itemIndex) => (
 					<TableRow
+						// The list of items here is never reordered, and is strictly appended to,
+						// so using the index as the key here is safe.
 						key={itemIndex}
-						style={{
-							backgroundColor:
-								item.changeKind === "added"
-									? tokens.colorPaletteRoyalBlueBackground2
-									: tokens.colorPaletteRedBorder1,
-						}}
+						className={
+							themeInfo.name === ThemeOption.HighContrast
+								? style.highContrast
+								: item.changeKind === "joined"
+									? style.joined
+									: style.left
+						}
 					>
-						<TableCell>{item.changeKind}</TableCell>
+						<TableCell>
+							<LabelCellLayout
+								icon={
+									item.changeKind === "joined" ? <ArrowJoinRegular /> : <ArrowExitRegular />
+								}
+							>
+								{item.changeKind}
+							</LabelCellLayout>
+						</TableCell>
 						<TableCell>{item.clientId}</TableCell>
 						<TableCell>{item.time}</TableCell>
 					</TableRow>

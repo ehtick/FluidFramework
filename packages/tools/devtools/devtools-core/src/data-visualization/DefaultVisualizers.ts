@@ -8,22 +8,39 @@
  * implementations for our DDSs.
  */
 
-import { SharedCell } from "@fluidframework/cell";
-import { SharedCounter } from "@fluidframework/counter";
-import { IDirectory, SharedDirectory, SharedMap } from "@fluidframework/map";
-import { SharedMatrix } from "@fluidframework/matrix";
-import { SharedString } from "@fluidframework/sequence";
-import { ISharedObject } from "@fluidframework/shared-object-base";
-import { VisualizeChildData, VisualizeSharedObject } from "./DataVisualization";
-
+import { SharedCell, type ISharedCell } from "@fluidframework/cell/internal";
+import { SharedCounter } from "@fluidframework/counter/internal";
 import {
-	FluidObjectTreeNode,
-	FluidObjectValueNode,
-	FluidUnknownObjectNode,
+	type IDirectory,
+	type ISharedMap,
+	SharedMap,
+	type ISharedDirectory,
+	// eslint-disable-next-line import/no-deprecated
+	SharedDirectory,
+} from "@fluidframework/map/internal";
+import { SharedMatrix } from "@fluidframework/matrix/internal";
+import { SharedString } from "@fluidframework/sequence/internal";
+import type { ISharedObject } from "@fluidframework/shared-object-base/internal";
+import type { ITreeInternal } from "@fluidframework/tree/internal";
+import { SharedTree } from "@fluidframework/tree/internal";
+
+import { EditType } from "../CommonInterfaces.js";
+
+import type { VisualizeChildData, VisualizeSharedObject } from "./DataVisualization.js";
+import {
+	determineNodeKind,
+	toVisualTree,
+	visualizeSharedTreeNodeBySchema,
+} from "./SharedTreeVisualizer.js";
+import {
+	type FluidObjectNode,
+	type FluidObjectTreeNode,
+	type FluidObjectValueNode,
+	type FluidUnknownObjectNode,
+	type VisualChildNode,
 	VisualNodeKind,
-	VisualChildNode,
-	VisualTreeNode,
-} from "./VisualTree";
+	type VisualTreeNode,
+} from "./VisualTree.js";
 
 /**
  * Default {@link VisualizeSharedObject} for {@link SharedCell}.
@@ -31,18 +48,58 @@ import {
 export const visualizeSharedCell: VisualizeSharedObject = async (
 	sharedObject: ISharedObject,
 	visualizeChildData: VisualizeChildData,
-): Promise<FluidObjectTreeNode> => {
-	const sharedCell = sharedObject as SharedCell<unknown>;
+): Promise<FluidObjectNode> => {
+	const sharedCell = sharedObject as ISharedCell<unknown>;
 	const data = sharedCell.get();
 
 	const renderedData = await visualizeChildData(data);
 
-	return {
-		fluidObjectId: sharedCell.id,
-		children: { data: renderedData },
-		typeMetadata: "SharedCell",
-		nodeKind: VisualNodeKind.FluidTreeNode,
+	const editProps = {
+		editTypes: undefined,
 	};
+
+	// By separating cases it lets us avoid unnecessary hierarchy by flattening the tree
+	switch (renderedData.nodeKind) {
+		case VisualNodeKind.FluidHandleNode: {
+			return {
+				children: {
+					data: renderedData,
+				},
+				fluidObjectId: sharedCell.id,
+				typeMetadata: "SharedCell",
+				nodeKind: VisualNodeKind.FluidTreeNode,
+				editProps,
+			};
+		}
+		case VisualNodeKind.ValueNode: {
+			return {
+				...renderedData,
+				fluidObjectId: sharedCell.id,
+				typeMetadata: "SharedCell",
+				nodeKind: VisualNodeKind.FluidValueNode,
+				editProps,
+			};
+		}
+		case VisualNodeKind.TreeNode: {
+			return {
+				...renderedData,
+				fluidObjectId: sharedCell.id,
+				typeMetadata: "SharedCell",
+				nodeKind: VisualNodeKind.FluidTreeNode,
+				editProps,
+			};
+		}
+		case VisualNodeKind.UnknownObjectNode: {
+			return {
+				fluidObjectId: sharedCell.id,
+				typeMetadata: "SharedCell",
+				nodeKind: VisualNodeKind.FluidUnknownObjectNode,
+			};
+		}
+		default: {
+			throw new Error("Unrecognized node kind.");
+		}
+	}
 };
 
 /**
@@ -57,6 +114,7 @@ export const visualizeSharedCounter: VisualizeSharedObject = async (
 		value: sharedCounter.value,
 		typeMetadata: "SharedCounter",
 		nodeKind: VisualNodeKind.FluidValueNode,
+		editProps: { editTypes: [EditType.Number] },
 	};
 };
 
@@ -67,7 +125,7 @@ export const visualizeSharedDirectory: VisualizeSharedObject = async (
 	sharedObject: ISharedObject,
 	visualizeChildData: VisualizeChildData,
 ): Promise<FluidObjectTreeNode> => {
-	const sharedDirectory = sharedObject as SharedDirectory;
+	const sharedDirectory = sharedObject as ISharedDirectory;
 	const renderedChildData = await visualizeDirectory(sharedDirectory, visualizeChildData);
 	return {
 		fluidObjectId: sharedDirectory.id,
@@ -121,7 +179,7 @@ export const visualizeSharedMap: VisualizeSharedObject = async (
 	sharedObject: ISharedObject,
 	visualizeChildData: VisualizeChildData,
 ): Promise<FluidObjectTreeNode> => {
-	const sharedMap = sharedObject as SharedMap;
+	const sharedMap = sharedObject as ISharedMap;
 
 	const children: Record<string, VisualChildNode> = {};
 	for (const [key, value] of sharedMap) {
@@ -147,31 +205,23 @@ export const visualizeSharedMatrix: VisualizeSharedObject = async (
 	sharedObject: ISharedObject,
 	visualizeChildData: VisualizeChildData,
 ): Promise<FluidObjectTreeNode> => {
-	const sharedMatrix = sharedObject as SharedMatrix;
+	const sharedMatrix = sharedObject as unknown as SharedMatrix;
 
 	const { rowCount, colCount: columnCount, id: fluidObjectId } = sharedMatrix;
 
-	// Output will list child contents by row first, then by cell (column).
-	const rows: Record<string, VisualTreeNode> = {};
+	// Output will list cells as a flat list, keyed by their row,column indices (e.g. `[0,1]`)
+	const cells: Record<string, VisualChildNode> = {};
 	for (let rowIndex = 0; rowIndex < rowCount; rowIndex++) {
-		const cells: Record<string, VisualChildNode> = {};
 		for (let columnIndex = 0; columnIndex < columnCount; columnIndex++) {
 			const cell = sharedMatrix.getCell(rowIndex, columnIndex) as unknown;
 			const renderedCell = await visualizeChildData(cell);
-			cells[columnIndex] = renderedCell;
+			cells[`[${rowIndex},${columnIndex}]`] = renderedCell;
 		}
-		rows[rowIndex] = {
-			children: cells,
-			metadata: {
-				cells: columnCount,
-			},
-			nodeKind: VisualNodeKind.TreeNode,
-		};
 	}
 
 	return {
 		fluidObjectId,
-		children: rows,
+		children: cells,
 		metadata: {
 			rows: rowCount,
 			columns: columnCount,
@@ -195,7 +245,49 @@ export const visualizeSharedString: VisualizeSharedObject = async (
 		value: text,
 		typeMetadata: "SharedString",
 		nodeKind: VisualNodeKind.FluidValueNode,
+		editProps: { editTypes: [EditType.String] },
 	};
+};
+
+/**
+ * {@link VisualizeSharedObject} for {@link ISharedTree}.
+ */
+export const visualizeSharedTree: VisualizeSharedObject = async (
+	sharedObject: ISharedObject,
+	visualizeChildData: VisualizeChildData,
+): Promise<FluidObjectNode> => {
+	const sharedTree = sharedObject as ITreeInternal;
+
+	// Root node of the SharedTree's content.
+	const treeView = sharedTree.exportVerbose();
+	// TODO: this visualizer doesn't consider the root as a field, and thus does not display the allowed types or handle when it is empty.
+	// Tracked by https://dev.azure.com/fluidframework/internal/_workitems/edit/26472.
+	if (treeView === undefined) {
+		throw new Error("Support for visualizing empty trees is not implemented");
+	}
+
+	// Schema of the tree node.
+	const treeSchema = sharedTree.exportSimpleSchema();
+
+	// Traverses the SharedTree and generates a visual representation of the tree and its schema.
+	const visualTreeRepresentation = await visualizeSharedTreeNodeBySchema(
+		treeView,
+		treeSchema,
+		visualizeChildData,
+	);
+
+	// Maps the `visualTreeRepresentation` in the format compatible to {@link visualizeChildData} function.
+	const visualTree = toVisualTree(visualTreeRepresentation);
+
+	// TODO: Validate the type casting.
+	const visualTreeResult: FluidObjectNode = {
+		...visualTree,
+		fluidObjectId: sharedTree.id,
+		typeMetadata: "SharedTree",
+		nodeKind: determineNodeKind(visualTree.nodeKind),
+	} as unknown as FluidObjectNode;
+
+	return visualTreeResult;
 };
 
 /**
@@ -217,9 +309,11 @@ export const visualizeUnknownSharedObject: VisualizeSharedObject = async (
 export const defaultVisualizers: Record<string, VisualizeSharedObject> = {
 	[SharedCell.getFactory().type]: visualizeSharedCell,
 	[SharedCounter.getFactory().type]: visualizeSharedCounter,
+	// eslint-disable-next-line import/no-deprecated
 	[SharedDirectory.getFactory().type]: visualizeSharedDirectory,
 	[SharedMap.getFactory().type]: visualizeSharedMap,
 	[SharedMatrix.getFactory().type]: visualizeSharedMatrix,
 	[SharedString.getFactory().type]: visualizeSharedString,
+	[SharedTree.getFactory().type]: visualizeSharedTree,
 	// TODO: the others
 };

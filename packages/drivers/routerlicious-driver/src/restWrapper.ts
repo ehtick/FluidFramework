@@ -3,33 +3,48 @@
  * Licensed under the MIT License.
  */
 
-import { ITelemetryLogger, ITelemetryProperties } from "@fluidframework/common-definitions";
-import { assert, fromUtf8ToBase64, performance } from "@fluidframework/common-utils";
-import { RateLimiter } from "@fluidframework/driver-utils";
+import { fromUtf8ToBase64, performance } from "@fluid-internal/client-utils";
+import { ITelemetryBaseProperties } from "@fluidframework/core-interfaces";
+import { assert } from "@fluidframework/core-utils/internal";
 import {
-	getAuthorizationTokenFromCredentials,
+	GenericNetworkError,
+	NonRetryableError,
+	RateLimiter,
+} from "@fluidframework/driver-utils/internal";
+import {
+	CorrelationIdHeaderName,
+	DriverVersionHeaderName,
 	RestLessClient,
+	getAuthorizationTokenFromCredentials,
 } from "@fluidframework/server-services-client";
-import { PerformanceEvent, TelemetryLogger } from "@fluidframework/telemetry-utils";
+import {
+	ITelemetryLoggerExt,
+	PerformanceEvent,
+	numberFromString,
+} from "@fluidframework/telemetry-utils/internal";
 import fetch from "cross-fetch";
-import type { AxiosRequestConfig, AxiosRequestHeaders } from "axios";
 import safeStringify from "json-stringify-safe";
-import { v4 as uuid } from "uuid";
-import { throwR11sNetworkError } from "./errorUtils";
-import { ITokenProvider, ITokenResponse } from "./tokens";
-import { pkgVersion as driverVersion } from "./packageVersion";
-import { QueryStringType, RestWrapper } from "./restWrapperBase";
+
+import type { AxiosRequestConfig, RawAxiosRequestHeaders } from "./axios.cjs";
+import {
+	getUrlForTelemetry,
+	RouterliciousErrorTypes,
+	throwR11sNetworkError,
+} from "./errorUtils.js";
+import { pkgVersion as driverVersion } from "./packageVersion.js";
+import { addOrUpdateQueryParams, type QueryStringType } from "./queryStringUtils.js";
+import { RestWrapper } from "./restWrapperBase.js";
+import { ITokenProvider, ITokenResponse } from "./tokens.js";
 
 type AuthorizationHeaderGetter = (token: ITokenResponse) => string;
-type TokenFetcher = (refresh?: boolean) => Promise<ITokenResponse>;
+export type TokenFetcher = (refresh?: boolean) => Promise<ITokenResponse>;
 
-const axiosRequestConfigToFetchRequestConfig = (
-	requestConfig: AxiosRequestConfig,
-): [RequestInfo, RequestInit] => {
-	const requestInfo: string =
-		requestConfig.baseURL !== undefined
-			? `${requestConfig.baseURL}${requestConfig.url ?? ""}`
-			: requestConfig.url ?? "";
+const buildRequestUrl = (requestConfig: AxiosRequestConfig) =>
+	requestConfig.baseURL !== undefined
+		? `${requestConfig.baseURL ?? ""}${requestConfig.url ?? ""}`
+		: (requestConfig.url ?? "");
+
+const axiosBuildRequestInitConfig = (requestConfig: AxiosRequestConfig): RequestInit => {
 	const requestInit: RequestInit = {
 		method: requestConfig.method,
 		// NOTE: I believe that although the Axios type permits non-string values in the header, here we are
@@ -37,20 +52,20 @@ const axiosRequestConfigToFetchRequestConfig = (
 		headers: requestConfig.headers as Record<string, string>,
 		body: requestConfig.data,
 	};
-	return [requestInfo, requestInit];
+	return requestInit;
 };
 
 export interface IR11sResponse<T> {
 	content: T;
 	headers: Map<string, string>;
-	propsToLog: ITelemetryProperties;
+	propsToLog: ITelemetryBaseProperties;
 	requestUrl: string;
 }
 
 /**
- * A utility function to create a r11s response without any additional props as we might not have them always.
- * @param content - response which is equivalent to content.
- * @returns - a r11s response without any extra props.
+ * A utility function to create a Routerlicious response without any additional props as we might not have them always.
+ * @param content - Response which is equivalent to content.
+ * @returns A Routerlicious response without any extra props.
  */
 export function createR11sResponseFromContent<T>(content: T): IR11sResponse<T> {
 	return {
@@ -70,6 +85,7 @@ function headersToMap(headers: Headers) {
 }
 
 export function getPropsToLogFromResponse(headers: {
+	// eslint-disable-next-line @rushstack/no-new-null
 	get: (id: string) => string | undefined | null;
 }) {
 	interface LoggingHeader {
@@ -80,12 +96,12 @@ export function getPropsToLogFromResponse(headers: {
 	// We rename headers so that otel doesn't scrub them away. Otel doesn't allow
 	// certain characters in headers including '-'
 	const headersToLog: LoggingHeader[] = [
-		{ headerName: "x-correlation-id", logName: "requestCorrelationId" },
+		{ headerName: CorrelationIdHeaderName, logName: "requestCorrelationId" },
 		{ headerName: "content-encoding", logName: "contentEncoding" },
 		{ headerName: "content-type", logName: "contentType" },
 	];
-	const additionalProps: ITelemetryProperties = {
-		contentsize: TelemetryLogger.numberFromString(headers.get("content-length")),
+	const additionalProps: ITelemetryBaseProperties = {
+		contentsize: numberFromString(headers.get("content-length")),
 	};
 	headersToLog.forEach((header) => {
 		const headerValue = headers.get(header.headerName);
@@ -97,17 +113,25 @@ export function getPropsToLogFromResponse(headers: {
 	return additionalProps;
 }
 
-export class RouterliciousRestWrapper extends RestWrapper {
+class RouterliciousRestWrapper extends RestWrapper {
 	private readonly restLess = new RestLessClient();
 	private token: ITokenResponse | undefined;
 
+	/**
+	 * A locally maintained map which saves the number of retries for any REST api call made through restWrapper.
+	 * It uses the href of the request url as a key against which it saves the retry counts. Retries are only counted in case of failures.
+	 * This feature is added to enable FRS to have more telemetry insights into whether the requests are being retried from same client or multiple.
+	 */
+	private readonly retryCounter = new Map<string, number>();
+
 	constructor(
-		logger: ITelemetryLogger,
+		logger: ITelemetryLoggerExt,
 		private readonly rateLimiter: RateLimiter,
 		private readonly fetchRefreshedToken: TokenFetcher,
 		private readonly getAuthorizationHeader: AuthorizationHeaderGetter,
 		private readonly useRestLess: boolean,
 		baseurl?: string,
+		private tokenP?: Promise<ITokenResponse>,
 		defaultQueryString: QueryStringType = {},
 	) {
 		super(baseurl, defaultQueryString);
@@ -118,23 +142,73 @@ export class RouterliciousRestWrapper extends RestWrapper {
 		statusCode: number,
 		canRetry = true,
 	): Promise<IR11sResponse<T>> {
+		if (requestConfig.params) {
+			// delete the retry param, if any. We do this to ensure there is no retry added by any of callers, which would conflict with the one we maintain here in the retryCounter map.
+			delete requestConfig.params.retry;
+		}
+
+		// Build the complete request url including baseUrl, url and query params. (all except 'retry' query param)
+		let completeRequestUrl = addOrUpdateQueryParams(
+			buildRequestUrl(requestConfig),
+			requestConfig.params,
+		);
+
+		// Check whether this request has been made before or if it is a retry.
+		// requestKey is built using the HTTP method appended with the complete URL ommitting the 'retry' param
+		const requestKey = `${requestConfig.method ?? ""}|${completeRequestUrl.href}`;
+		const requestRetryCount = this.retryCounter.get(requestKey);
+		if (requestRetryCount) {
+			completeRequestUrl = addOrUpdateQueryParams(completeRequestUrl, {
+				retry: requestRetryCount,
+			});
+		}
+
 		const config = {
 			...requestConfig,
 			headers: await this.generateHeaders(requestConfig.headers),
 		};
 
 		const translatedConfig = this.useRestLess ? this.restLess.translate(config) : config;
-		const fetchRequestConfig = axiosRequestConfigToFetchRequestConfig(translatedConfig);
+		const fetchRequestConfig = axiosBuildRequestInitConfig(translatedConfig);
 
 		const res = await this.rateLimiter.schedule(async () => {
 			const perfStart = performance.now();
-			const result = await fetch(...fetchRequestConfig).catch(async (error) => {
-				// Browser Fetch throws a TypeError on network error, `node-fetch` throws a FetchError
-				const isNetworkError = ["TypeError", "FetchError"].includes(error?.name);
-				throwR11sNetworkError(
-					isNetworkError ? `NetworkError: ${error.message}` : safeStringify(error),
-				);
-			});
+			const result = await fetch(completeRequestUrl, fetchRequestConfig).catch(
+				async (error) => {
+					// on failure, add the request entry into the retryCounter map to count the subsequent retries, if any
+					this.retryCounter.set(requestKey, requestRetryCount ? requestRetryCount + 1 : 1);
+
+					const telemetryProps = {
+						driverVersion,
+						retryCount: requestRetryCount,
+						url: getUrlForTelemetry(completeRequestUrl.hostname, completeRequestUrl.pathname),
+						requestMethod: fetchRequestConfig.method,
+					};
+
+					// Browser Fetch throws a TypeError on network error, `node-fetch` throws a FetchError
+					const isNetworkError = ["TypeError", "FetchError"].includes(error?.name);
+					const errorMessage = isNetworkError
+						? `NetworkError: ${error.message}`
+						: safeStringify(error);
+					// If a service is temporarily down or a browser resource limit is reached, RestWrapper will throw
+					// a network error with no status code (e.g. err:ERR_CONN_REFUSED or err:ERR_FAILED) and
+					// the error message will start with NetworkError as defined in restWrapper.ts
+					// If there exists a self-signed SSL certificates error, throw a NonRetryableError
+					// TODO: instead of relying on string matching, filter error based on the error code like we do for websocket connections
+					const err = errorMessage.includes("failed, reason: self signed certificate")
+						? new NonRetryableError(
+								errorMessage,
+								RouterliciousErrorTypes.sslCertError,
+								telemetryProps,
+							)
+						: new GenericNetworkError(
+								errorMessage,
+								errorMessage.startsWith("NetworkError"),
+								telemetryProps,
+							);
+					throw err;
+				},
+			);
 			return {
 				response: result,
 				duration: performance.now() - perfStart,
@@ -142,6 +216,7 @@ export class RouterliciousRestWrapper extends RestWrapper {
 		});
 
 		const response = res.response;
+		const headers = headersToMap(response.headers);
 
 		let start = performance.now();
 		const text = await response.text();
@@ -149,19 +224,22 @@ export class RouterliciousRestWrapper extends RestWrapper {
 
 		const bodySize = text.length;
 		start = performance.now();
-		const responseBody: any = response.headers.get("content-type")?.includes("application/json")
+		const responseBody: any = response.headers
+			.get("content-type")
+			?.includes("application/json")
 			? JSON.parse(text)
 			: text;
 		const parseTime = performance.now() - start;
 
 		// Success
 		if (response.ok || response.status === statusCode) {
+			// on successful response, remove the entry from the retryCounter map
+			this.retryCounter.delete(requestKey);
 			const result = responseBody as T;
-			const headers = headersToMap(response.headers);
 			return {
 				content: result,
 				headers,
-				requestUrl: fetchRequestConfig[0].toString(),
+				requestUrl: completeRequestUrl.href,
 				propsToLog: {
 					...getPropsToLogFromResponse(headers),
 					bodySize,
@@ -171,17 +249,24 @@ export class RouterliciousRestWrapper extends RestWrapper {
 				},
 			};
 		}
+
 		// Failure
+		// on failure, add the request entry into the retryCounter map to count the subsequent retries
+		this.retryCounter.set(requestKey, requestRetryCount ? requestRetryCount + 1 : 1);
+
 		if (response.status === 401 && canRetry) {
 			// Refresh Authorization header and retry once
 			this.token = await this.fetchRefreshedToken(true /* refreshToken */);
-			return this.request<T>(config, statusCode, false);
+			return this.request<T>({ ...config }, statusCode, false);
 		}
 		if (response.status === 429 && responseBody?.retryAfter > 0) {
 			// Retry based on retryAfter[Seconds]
 			return new Promise<IR11sResponse<T>>((resolve, reject) =>
 				setTimeout(() => {
-					this.request<T>(config, statusCode).then(resolve).catch(reject);
+					// use the original request URL without the retryCount appended
+					this.request<T>({ ...config }, statusCode)
+						.then(resolve)
+						.catch(reject);
 				}, responseBody.retryAfter * 1000),
 			);
 		}
@@ -196,33 +281,36 @@ export class RouterliciousRestWrapper extends RestWrapper {
 			`R11s fetch error: ${responseSummary}`,
 			response.status,
 			responseBody?.retryAfter,
+			{
+				...getPropsToLogFromResponse(headers),
+				driverVersion,
+				url: getUrlForTelemetry(completeRequestUrl.hostname, completeRequestUrl.pathname),
+				requestMethod: fetchRequestConfig.method,
+			},
 		);
 	}
 
 	private async generateHeaders(
-		requestHeaders?: AxiosRequestHeaders | undefined,
-	): Promise<Record<string, string>> {
+		requestHeaders?: RawAxiosRequestHeaders | undefined,
+	): Promise<RawAxiosRequestHeaders> {
 		const token = await this.getToken();
 		assert(token !== undefined, 0x679 /* token should be present */);
-		const correlationId = requestHeaders?.["x-correlation-id"] ?? uuid();
-
-		return {
+		const headers: RawAxiosRequestHeaders = {
 			...requestHeaders,
-			// TODO: replace header names with CorrelationIdHeaderName and DriverVersionHeaderName from services-client
-			// NOTE: Can correlationId actually be number | true?
-			"x-correlation-id": correlationId as string,
-			"x-driver-version": driverVersion,
+			[DriverVersionHeaderName]: driverVersion,
 			// NOTE: If this.authorizationHeader is undefined, should "Authorization" be removed entirely?
-			"Authorization": this.getAuthorizationHeader(token),
+			Authorization: this.getAuthorizationHeader(token),
 		};
+		return headers;
 	}
 
 	public async getToken(): Promise<ITokenResponse> {
 		if (this.token !== undefined) {
 			return this.token;
 		}
-		const token = await this.fetchRefreshedToken();
+		const token = await (this.tokenP ?? this.fetchRefreshedToken());
 		this.setToken(token);
+		this.tokenP = undefined;
 		return token;
 	}
 
@@ -233,12 +321,13 @@ export class RouterliciousRestWrapper extends RestWrapper {
 
 export class RouterliciousStorageRestWrapper extends RouterliciousRestWrapper {
 	private constructor(
-		logger: ITelemetryLogger,
+		logger: ITelemetryLoggerExt,
 		rateLimiter: RateLimiter,
 		fetchToken: TokenFetcher,
 		getAuthorizationHeader: AuthorizationHeaderGetter,
 		useRestLess: boolean,
 		baseurl?: string,
+		initialTokenP?: Promise<ITokenResponse>,
 		defaultQueryString: QueryStringType = {},
 	) {
 		super(
@@ -248,41 +337,22 @@ export class RouterliciousStorageRestWrapper extends RouterliciousRestWrapper {
 			getAuthorizationHeader,
 			useRestLess,
 			baseurl,
+			initialTokenP,
 			defaultQueryString,
 		);
 	}
 
-	public static async load(
+	public static load(
 		tenantId: string,
-		documentId: string,
-		tokenProvider: ITokenProvider,
-		logger: ITelemetryLogger,
+		tokenFetcher: TokenFetcher,
+		logger: ITelemetryLoggerExt,
 		rateLimiter: RateLimiter,
 		useRestLess: boolean,
 		baseurl?: string,
-	): Promise<RouterliciousStorageRestWrapper> {
+		initialTokenP?: Promise<ITokenResponse>,
+	): RouterliciousStorageRestWrapper {
 		const defaultQueryString = {
 			token: `${fromUtf8ToBase64(tenantId)}`,
-		};
-
-		const fetchStorageToken = async (refreshToken?: boolean): Promise<ITokenResponse> => {
-			return PerformanceEvent.timedExecAsync(
-				logger,
-				{
-					eventName: "FetchStorageToken",
-					docId: documentId,
-				},
-				async () => {
-					// Craft credentials using tenant id and token
-					const storageToken = await tokenProvider.fetchStorageToken(
-						tenantId,
-						documentId,
-						refreshToken,
-					);
-
-					return storageToken;
-				},
-			);
 		};
 
 		const getAuthorizationHeader: AuthorizationHeaderGetter = (
@@ -298,10 +368,11 @@ export class RouterliciousStorageRestWrapper extends RouterliciousRestWrapper {
 		const restWrapper = new RouterliciousStorageRestWrapper(
 			logger,
 			rateLimiter,
-			fetchStorageToken,
+			tokenFetcher,
 			getAuthorizationHeader,
 			useRestLess,
 			baseurl,
+			initialTokenP,
 			defaultQueryString,
 		);
 
@@ -311,12 +382,13 @@ export class RouterliciousStorageRestWrapper extends RouterliciousRestWrapper {
 
 export class RouterliciousOrdererRestWrapper extends RouterliciousRestWrapper {
 	private constructor(
-		logger: ITelemetryLogger,
+		logger: ITelemetryLoggerExt,
 		rateLimiter: RateLimiter,
 		fetchToken: TokenFetcher,
 		getAuthorizationHeader: AuthorizationHeaderGetter,
 		useRestLess: boolean,
 		baseurl?: string,
+		initialTokenP?: Promise<ITokenResponse>,
 		defaultQueryString: QueryStringType = {},
 	) {
 		super(
@@ -326,53 +398,90 @@ export class RouterliciousOrdererRestWrapper extends RouterliciousRestWrapper {
 			getAuthorizationHeader,
 			useRestLess,
 			baseurl,
+			initialTokenP,
 			defaultQueryString,
 		);
 	}
 
-	public static async load(
-		tenantId: string,
-		documentId: string | undefined,
-		tokenProvider: ITokenProvider,
-		logger: ITelemetryLogger,
+	public static load(
+		tokenFetcher: TokenFetcher,
+		logger: ITelemetryLoggerExt,
 		rateLimiter: RateLimiter,
 		useRestLess: boolean,
 		baseurl?: string,
-	): Promise<RouterliciousOrdererRestWrapper> {
+		initialTokenP?: Promise<ITokenResponse>,
+	): RouterliciousOrdererRestWrapper {
 		const getAuthorizationHeader: AuthorizationHeaderGetter = (
 			token: ITokenResponse,
 		): string => {
 			return `Basic ${token.jwt}`;
 		};
 
-		const fetchOrdererToken = async (refreshToken?: boolean): Promise<ITokenResponse> => {
-			return PerformanceEvent.timedExecAsync(
-				logger,
-				{
-					eventName: "FetchOrdererToken",
-					docId: documentId,
-				},
-				async () => {
-					const ordererToken = await tokenProvider.fetchOrdererToken(
-						tenantId,
-						documentId,
-						refreshToken,
-					);
-
-					return ordererToken;
-				},
-			);
-		};
-
 		const restWrapper = new RouterliciousOrdererRestWrapper(
 			logger,
 			rateLimiter,
-			fetchOrdererToken,
+			tokenFetcher,
 			getAuthorizationHeader,
 			useRestLess,
 			baseurl,
+			initialTokenP,
 		);
 
 		return restWrapper;
 	}
+}
+
+export function toInstrumentedR11sOrdererTokenFetcher(
+	tenantId: string,
+	documentId: string | undefined,
+	tokenProvider: ITokenProvider,
+	logger: ITelemetryLoggerExt,
+): TokenFetcher {
+	const fetchOrdererToken = async (refreshToken?: boolean): Promise<ITokenResponse> => {
+		return PerformanceEvent.timedExecAsync(
+			logger,
+			{
+				eventName: "FetchOrdererToken",
+				docId: documentId,
+			},
+			async () => {
+				const ordererToken = await tokenProvider.fetchOrdererToken(
+					tenantId,
+					documentId,
+					refreshToken,
+				);
+
+				return ordererToken;
+			},
+		);
+	};
+	return fetchOrdererToken;
+}
+
+export function toInstrumentedR11sStorageTokenFetcher(
+	tenantId: string,
+	documentId: string,
+	tokenProvider: ITokenProvider,
+	logger: ITelemetryLoggerExt,
+): TokenFetcher {
+	const fetchStorageToken = async (refreshToken?: boolean): Promise<ITokenResponse> => {
+		return PerformanceEvent.timedExecAsync(
+			logger,
+			{
+				eventName: "FetchStorageToken",
+				docId: documentId,
+			},
+			async () => {
+				// Craft credentials using tenant id and token
+				const storageToken = await tokenProvider.fetchStorageToken(
+					tenantId,
+					documentId,
+					refreshToken,
+				);
+
+				return storageToken;
+			},
+		);
+	};
+	return fetchStorageToken;
 }

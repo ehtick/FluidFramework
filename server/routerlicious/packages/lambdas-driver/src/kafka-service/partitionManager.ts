@@ -14,11 +14,13 @@ import {
 	IContextErrorData,
 } from "@fluidframework/server-services-core";
 import { Lumberjack } from "@fluidframework/server-services-telemetry";
+import { Provider } from "nconf";
 import { Partition } from "./partition";
 
 /**
  * The PartitionManager is responsible for maintaining a list of partitions for the given Kafka topic.
  * It will route incoming messages to the appropriate partition for the messages.
+ * @internal
  */
 export class PartitionManager extends EventEmitter {
 	private readonly partitions = new Map<number, Partition>();
@@ -31,6 +33,7 @@ export class PartitionManager extends EventEmitter {
 		private readonly factory: IPartitionLambdaFactory,
 		private readonly consumer: IConsumer,
 		private readonly logger?: ILogger,
+		private readonly config?: Provider,
 		listenForConsumerErrors = true,
 	) {
 		super();
@@ -51,29 +54,47 @@ export class PartitionManager extends EventEmitter {
 		if (listenForConsumerErrors) {
 			this.consumer.on("error", (error, errorData: IContextErrorData) => {
 				if (this.stopped) {
+					Lumberjack.info(
+						"Consumer.onError: PartitionManager already stopped, not emitting error again",
+						{ error, ...errorData },
+					);
 					return;
 				}
 
 				this.emit("error", error, errorData);
 			});
 
-			this.consumer.on("checkpoint_success", (partitionId, queuedMessage) => {
-				if (this.sampleMessages(100)) {
-					Lumberjack.info(`Kafka checkpoint successful`, {
-						msgOffset: queuedMessage.offset,
-						topic: queuedMessage.topic,
-						msgPartition: queuedMessage.partition,
-					});
-				}
-			});
+			this.consumer.on(
+				"checkpoint_success",
+				(partitionId, queuedMessage, retries, latency) => {
+					if (this.sampleMessages(100)) {
+						Lumberjack.info(`Kafka checkpoint successful`, {
+							msgOffset: queuedMessage.offset,
+							topic: queuedMessage.topic,
+							msgPartition: queuedMessage.partition,
+							retries,
+							latency,
+						});
+					}
+				},
+			);
 
-			this.consumer.on("checkpoint_error", (partitionId, queuedMessage) => {
-				Lumberjack.error(`Kafka checkpoint failed`, {
-					msgOffset: queuedMessage.offset,
-					topic: queuedMessage.topic,
-					msgPartition: queuedMessage.partition,
-				});
-			});
+			this.consumer.on(
+				"checkpoint_error",
+				(partitionId, queuedMessage, retries, latency, ex) => {
+					Lumberjack.error(
+						`Kafka checkpoint failed`,
+						{
+							msgOffset: queuedMessage.offset,
+							topic: queuedMessage.topic,
+							msgPartition: queuedMessage.partition,
+							retries,
+							latency,
+						},
+						ex,
+					);
+				},
+			);
 		}
 	}
 
@@ -99,6 +120,24 @@ export class PartitionManager extends EventEmitter {
 		this.partitions.clear();
 
 		this.removeAllListeners();
+	}
+
+	public pause(partitionId: number, offset: number): void {
+		const partition = this.partitions.get(partitionId);
+		if (partition) {
+			partition.pause(offset);
+		} else {
+			throw new Error(`PartitionId ${partitionId} not found for pause`);
+		}
+	}
+
+	public resume(partitionId: number): void {
+		const partition = this.partitions.get(partitionId);
+		if (partition) {
+			partition.resume();
+		} else {
+			throw new Error(`PartitionId ${partitionId} not found for resume`);
+		}
 	}
 
 	private process(message: IQueuedMessage) {
@@ -195,15 +234,28 @@ export class PartitionManager extends EventEmitter {
 				this.factory,
 				this.consumer,
 				this.logger,
+				this.config,
 			);
 
 			// Listen for error events to know when the partition has stopped processing due to an error
 			newPartition.on("error", (error, errorData: IContextErrorData) => {
 				if (this.stopped) {
+					Lumberjack.info(
+						"Partition.onError: PartitionManager already stopped, not emitting error again",
+						{ error, ...errorData },
+					);
 					return;
 				}
-
+				Lumberjack.verbose("Emitting error from partitionManager, partition error event");
 				this.emit("error", error, errorData);
+			});
+
+			newPartition.on("pause", (partitionId: number, offset: number, reason?: any) => {
+				this.emit("pause", partitionId, offset, reason);
+			});
+
+			newPartition.on("resume", (partitionId: number) => {
+				this.emit("resume", partitionId);
 			});
 
 			this.partitions.set(partition.partition, newPartition);

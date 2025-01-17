@@ -8,42 +8,49 @@
  */
 
 export {
-	ApiFunctionLike,
-	ApiMemberKind,
-	ApiModuleLike,
-	ApiSignatureLike,
-	ApiModifier,
+	createQualifiedDocumentNameForApiItem,
 	doesItemRequireOwnDocument,
-	getDefaultValueBlock,
-	getDeprecatedBlock,
-	getExampleBlocks,
-	getFilePathForApiItem,
+	doesItemKindRequireOwnDocument,
+	filterItems,
 	getHeadingForApiItem,
 	getLinkForApiItem,
-	getModifiers,
-	getQualifiedApiItemName,
-	getReturnsBlock,
-	getSeeBlocks,
-	getThrowsBlocks,
-	getUnscopedPackageName,
-	isDeprecated,
-	isOptional,
-	isReadonly,
-	isStatic,
-} from "./ApiItemUtilities";
+	shouldItemBeIncluded,
+} from "./ApiItemTransformUtilities.js";
 export {
-	ApiItemTransformationConfiguration,
-	ApiItemTransformationOptions,
-	CreateChildContentSections,
-	// Consumers should not use this, it exists externally for documentation purposes only.
-	type DefaultDocumentationSuiteOptions,
-	DocumentationSuiteOptions,
-	DocumentBoundaries,
+	type ApiItemTransformationConfiguration,
+	type ApiItemTransformationConfigurationBase,
+	type ApiItemTransformationOptions,
+	type ApiItemTransformations,
+	type DefaultDocumentationSuiteConfiguration,
+	type DocumentHierarchyConfiguration,
+	type DocumentationSuiteConfiguration,
+	type DocumentationSuiteOptions,
+	FolderDocumentPlacement,
+	type FolderHierarchyConfiguration,
 	getApiItemTransformationConfigurationWithDefaults,
-	HierarchyBoundaries,
-	TransformApiItemWithChildren,
-	TransformApiItemWithoutChildren,
-} from "./configuration";
-export { transformDocNode } from "./DocNodeTransforms";
-export { apiItemToDocument, apiItemToSections } from "./TransformApiItem";
-export { transformApiModel } from "./TransformApiModel";
+	type DocumentationHierarchyConfiguration,
+	type DocumentationHierarchyConfigurationBase,
+	HierarchyKind,
+	type HierarchyConfiguration,
+	type HierarchyOptions,
+	type SectionHierarchyConfiguration,
+	type TransformApiItemWithChildren,
+	type TransformApiItemWithoutChildren,
+} from "./configuration/index.js";
+export {
+	createBreadcrumbParagraph,
+	createDeprecationNoticeSection,
+	createExamplesSection,
+	createParametersSection,
+	createRemarksSection,
+	createReturnsSection,
+	createSeeAlsoSection,
+	createSignatureSection,
+	createSummaryParagraph,
+	createThrowsSection,
+	createTypeParametersSection,
+} from "./helpers/index.js";
+export { transformTsdocNode } from "./TsdocNodeTransforms.js";
+export { apiItemToDocument, apiItemToSections } from "./TransformApiItem.js";
+export { transformApiModel } from "./TransformApiModel.js";
+export { checkForDuplicateDocumentPaths } from "./Utilities.js";

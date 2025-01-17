@@ -3,11 +3,11 @@
  * Licensed under the MIT License.
  */
 
+import type { IMessageRelay } from "@fluidframework/devtools-core/internal";
 import React from "react";
-import { IMessageRelay } from "@fluid-experimental/devtools-core";
 
 /**
- * Context for accessing a shared {@link @fluid-experimental/devtools-core#IMessageRelay} for communicating with the webpage.
+ * Context for accessing a shared {@link @fluidframework/devtools-core#IMessageRelay} for communicating with the webpage.
  *
  * @remarks
  *
@@ -15,14 +15,10 @@ import { IMessageRelay } from "@fluid-experimental/devtools-core";
  * `window` (`globalThis`) or through the `chrome.runtime` APIs to ensure general compatibility, regardless of
  * how the Chrome Extension is configured / what context the components are run in.
  */
-export const MessageRelayContext = React.createContext<IMessageRelay | undefined>(
-	// False positive
-	// eslint-disable-next-line unicorn/no-useless-undefined
-	undefined,
-);
+export const MessageRelayContext = React.createContext<IMessageRelay | undefined>(undefined);
 
 /**
- * Gets the {@link @fluid-experimental/devtools-core#IMessageRelay} from the local {@link MessageRelayContext}.
+ * Gets the {@link @fluidframework/devtools-core#IMessageRelay} from the local {@link MessageRelayContext}.
  *
  * @throws If {@link MessageRelayContext} has not been set.
  */

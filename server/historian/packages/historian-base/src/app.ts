@@ -3,11 +3,12 @@
  * Licensed under the MIT License.
  */
 
-import { AsyncLocalStorage } from "async_hooks";
 import {
 	IStorageNameRetriever,
 	IThrottler,
-	ITokenRevocationManager,
+	IRevokedTokenChecker,
+	IDocumentManager,
+	IReadinessCheck,
 } from "@fluidframework/server-services-core";
 import { json, urlencoded } from "body-parser";
 import compression from "compression";
@@ -17,24 +18,29 @@ import * as nconf from "nconf";
 import { DriverVersionHeaderName } from "@fluidframework/server-services-client";
 import {
 	alternativeMorganLoggerMiddleware,
-	bindCorrelationId,
+	bindTelemetryContext,
 	jsonMorganLoggerMiddleware,
 } from "@fluidframework/server-services-utils";
 import { BaseTelemetryProperties, HttpProperties } from "@fluidframework/server-services-telemetry";
-import { RestLessServer } from "@fluidframework/server-services-shared";
+import { RestLessServer, createHealthCheckEndpoints } from "@fluidframework/server-services-shared";
 import * as routes from "./routes";
-import { ICache, ITenantService } from "./services";
-import { getDocumentIdFromRequest, getTenantIdFromRequest } from "./utils";
+import { ICache, IDenyList, ITenantService, ISimplifiedCustomDataRetriever } from "./services";
+import { Constants, getDocumentIdFromRequest, getTenantIdFromRequest } from "./utils";
 
 export function create(
 	config: nconf.Provider,
 	tenantService: ITenantService,
-	storageNameRetriever: IStorageNameRetriever,
+	storageNameRetriever: IStorageNameRetriever | undefined,
 	restTenantThrottlers: Map<string, IThrottler>,
 	restClusterThrottlers: Map<string, IThrottler>,
+	documentManager: IDocumentManager,
+	startupCheck: IReadinessCheck,
 	cache?: ICache,
-	asyncLocalStorage?: AsyncLocalStorage<string>,
-	tokenRevocationManager?: ITokenRevocationManager,
+	revokedTokenChecker?: IRevokedTokenChecker,
+	denyList?: IDenyList,
+	ephemeralDocumentTTLSec?: number,
+	readinessCheck?: IReadinessCheck,
+	simplifiedCustomDataRetriever?: ISimplifiedCustomDataRetriever,
 ) {
 	// Express app configuration
 	const app: express.Express = express();
@@ -52,20 +58,38 @@ export function create(
 	};
 	app.use(restLessMiddleware());
 
+	app.use(bindTelemetryContext());
 	const loggerFormat = config.get("logger:morganFormat");
 	if (loggerFormat === "json") {
+		const enableResponseCloseLatencyMetric =
+			config.get("enableResponseCloseLatencyMetric") ?? false;
 		app.use(
-			jsonMorganLoggerMiddleware("historian", (tokens, req, res) => {
-				const tenantId = getTenantIdFromRequest(req.params);
-				return {
-					[HttpProperties.driverVersion]: tokens.req(req, res, DriverVersionHeaderName),
-					[BaseTelemetryProperties.tenantId]: tenantId,
-					[BaseTelemetryProperties.documentId]: getDocumentIdFromRequest(
-						tenantId,
-						req.get("Authorization"),
-					),
-				};
-			}),
+			jsonMorganLoggerMiddleware(
+				"historian",
+				(tokens, req, res) => {
+					const tenantId = getTenantIdFromRequest(req.params);
+					const authHeader = req.get("Authorization");
+					const additionalProperties: Record<string, any> = {
+						[HttpProperties.driverVersion]: tokens.req(
+							req,
+							res,
+							DriverVersionHeaderName,
+						),
+						[BaseTelemetryProperties.tenantId]: tenantId,
+						[BaseTelemetryProperties.documentId]: getDocumentIdFromRequest(
+							tenantId,
+							authHeader,
+						),
+					};
+					if (req.get(Constants.IsEphemeralContainer) !== undefined) {
+						additionalProperties.isEphemeralContainer = req.get(
+							Constants.IsEphemeralContainer,
+						);
+					}
+					return additionalProperties;
+				},
+				enableResponseCloseLatencyMetric,
+			),
 		);
 	} else {
 		app.use(alternativeMorganLoggerMiddleware(loggerFormat));
@@ -76,7 +100,6 @@ export function create(
 
 	app.use(compression());
 	app.use(cors());
-	app.use(bindCorrelationId(asyncLocalStorage));
 
 	const apiRoutes = routes.create(
 		config,
@@ -84,9 +107,12 @@ export function create(
 		storageNameRetriever,
 		restTenantThrottlers,
 		restClusterThrottlers,
+		documentManager,
 		cache,
-		asyncLocalStorage,
-		tokenRevocationManager,
+		revokedTokenChecker,
+		denyList,
+		ephemeralDocumentTTLSec,
+		simplifiedCustomDataRetriever,
 	);
 	app.use(apiRoutes.git.blobs);
 	app.use(apiRoutes.git.refs);
@@ -97,6 +123,14 @@ export function create(
 	app.use(apiRoutes.repository.contents);
 	app.use(apiRoutes.repository.headers);
 	app.use(apiRoutes.summaries);
+
+	const healthCheckEndpoints = createHealthCheckEndpoints(
+		"historian",
+		startupCheck,
+		readinessCheck,
+		false /* createLivenessEndpoint */,
+	);
+	app.use("/healthz", healthCheckEndpoints);
 
 	// catch 404 and forward to error handler
 	app.use((req, res, next) => {

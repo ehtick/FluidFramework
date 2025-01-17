@@ -3,14 +3,12 @@
  * Licensed under the MIT License.
  */
 
-import { assert, IsoBuffer } from "@fluidframework/common-utils";
-import {
-	SummaryType,
-	ISnapshotTree,
-	ISummaryTree,
-	SummaryObject,
-} from "@fluidframework/protocol-definitions";
-import { INormalizedWholeSummary } from "./contracts";
+import { IsoBuffer } from "@fluid-internal/client-utils";
+import { assert } from "@fluidframework/core-utils/internal";
+import { ISummaryTree, SummaryObject, SummaryType } from "@fluidframework/driver-definitions";
+import { ISnapshotTree } from "@fluidframework/driver-definitions/internal";
+
+import { INormalizedWholeSnapshot } from "./contracts.js";
 
 /**
  * Summary tree assembler props
@@ -20,6 +18,7 @@ export interface ISummaryTreeAssemblerProps {
 	 * Indicates that this tree is unreferenced. If this is not present, the tree is considered referenced.
 	 */
 	unreferenced?: true;
+	groupId?: string;
 }
 
 /**
@@ -39,6 +38,7 @@ export class SummaryTreeAssembler {
 			type: SummaryType.Tree,
 			tree: { ...this.summaryTree },
 			unreferenced: this.props?.unreferenced,
+			groupId: this.props?.groupId,
 		};
 	}
 
@@ -94,6 +94,7 @@ export function convertSnapshotAndBlobsToSummaryTree(
 ): ISummaryTree {
 	const assembler = new SummaryTreeAssembler({
 		unreferenced: snapshot.unreferenced,
+		groupId: snapshot.groupId,
 	});
 	for (const [path, id] of Object.entries(snapshot.blobs)) {
 		const blob = blobs.get(id);
@@ -107,7 +108,7 @@ export function convertSnapshotAndBlobsToSummaryTree(
 	return assembler.summary;
 }
 
-export function evalBlobsAndTrees(snapshot: INormalizedWholeSummary) {
+export function evalBlobsAndTrees(snapshot: INormalizedWholeSnapshot) {
 	const trees = countTreesInSnapshotTree(snapshot.snapshotTree);
 	const numBlobs = snapshot.blobs.size;
 	let encodedBlobsSize = 0;

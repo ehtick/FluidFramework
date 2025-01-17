@@ -3,6 +3,7 @@ package-lock.json
 
 # Build output
 dist
+lib
 *.tsbuildinfo
 
 # npm dependencies
@@ -14,3 +15,6 @@ _api-extractor-temp
 # Test output
 coverage
 nyc
+
+# Telemetry token
+.env

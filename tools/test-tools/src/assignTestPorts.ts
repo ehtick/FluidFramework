@@ -20,15 +20,18 @@ export interface PackageInfo {
  */
 export function getPackageInfo(): PackageInfo[] {
 	try {
+		const child = spawnSync("pnpm", ["recursive", "list", "--json", "--depth=-1"], {
+			encoding: "utf8",
+			// shell:true is required for Windows without a resolved path to pnpm.
+			shell: true,
+		});
 		// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-		const info: PackageInfo[] = JSON.parse(
-			spawnSync("pnpm", ["recursive", "list", "--json", "--depth=-1"], {
-				encoding: "utf-8",
-			}).stdout,
-		);
+		const info: PackageInfo[] = JSON.parse(child.stdout);
 		if (!Array.isArray(info)) {
 			// eslint-disable-next-line unicorn/prefer-type-error
-			throw new Error("stdin input was not package array");
+			throw new Error(
+				`stdin input was not package array. Spawn result: ${JSON.stringify(child)}`,
+			);
 		}
 		return info;
 	} catch (error) {
@@ -37,12 +40,12 @@ export function getPackageInfo(): PackageInfo[] {
 	}
 }
 
-export function writePortMapFile(): void {
+export function writePortMapFile(initialPort: number): void {
 	const info: PackageInfo[] = getPackageInfo();
 
 	// Assign a unique port to each package
 	const portMap: { [pkgName: string]: number } = {};
-	let port = 8081;
+	let port = initialPort;
 	for (const pkg of info) {
 		if (pkg.name === undefined) {
 			console.error("missing name in package info");

@@ -3,14 +3,15 @@
  * Licensed under the MIT License.
  */
 
-import { DataObject, DataObjectFactory } from "@fluidframework/aqueduct";
+import { DataObject, DataObjectFactory } from "@fluidframework/aqueduct/legacy";
 
-import { AppState } from "./state";
+import { AppState } from "./state.js";
 
+/**
+ * @internal
+ */
 export class Bubblebench extends DataObject {
-	public static get Name(): string {
-		return "@fluid-example/bubblebench-baseline";
-	}
+	public static readonly Name = "@fluid-example/bubblebench-baseline";
 	private state?: AppState;
 
 	protected async hasInitialized(): Promise<void> {
@@ -32,6 +33,7 @@ export class Bubblebench extends DataObject {
 /**
  * The DataObjectFactory declares the Fluid object and defines any additional distributed data structures.
  * To add a SharedSequence, SharedMap, or any other structure, put it in the array below.
+ * @internal
  */
 export const BubblebenchInstantiationFactory = new DataObjectFactory(
 	Bubblebench.Name,

@@ -5,8 +5,9 @@
 
 import React, { useState } from "react";
 
-import type { IAppModel } from "../model-interface";
-import { TaskListView } from "./taskListView";
+import type { IAppModel } from "../model-interface/index.js";
+
+import { TaskListView } from "./taskListView.js";
 
 /**
  * {@link AppView} input props.
@@ -30,7 +31,9 @@ export const AppView: React.FC<IAppViewProps> = (props: IAppViewProps) => {
 	model.baseDocument.on("leaderChanged", (newLeader: string) => {
 		setLeaderID(newLeader);
 	});
-	return taskList !== undefined ? (
+	return taskList === undefined ? (
+		<div>Whomp whomp whomp</div>
+	) : (
 		<TaskListView
 			taskList={taskList}
 			claimLeadership={(): void => {
@@ -39,7 +42,5 @@ export const AppView: React.FC<IAppViewProps> = (props: IAppViewProps) => {
 			clientID={clientID}
 			leaderID={leaderID}
 		/>
-	) : (
-		<div>Whomp whomp whomp</div>
 	);
 };

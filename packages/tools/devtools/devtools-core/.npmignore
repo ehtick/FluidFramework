@@ -1,9 +1,11 @@
 # Build metadata
-*.tsbuildinfo
+**/*.tsbuildinfo
+*.log
 
 # Test code
 src/test
 dist/test
+lib/test
 
 # Temporary api-extractor build artifacts
 _api-extractor-temp

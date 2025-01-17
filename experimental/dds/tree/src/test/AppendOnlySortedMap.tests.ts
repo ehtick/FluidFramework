@@ -6,10 +6,12 @@
 /* eslint-disable no-bitwise */
 
 import { strict as assert } from 'assert';
+
+import { validateAssertionError } from '@fluidframework/test-runtime-utils/internal';
 import { expect } from 'chai';
-import { validateAssertionError } from '@fluidframework/test-runtime-utils';
-import { assertNotUndefined, compareFiniteNumbers } from '../Common';
-import { AppendOnlyDoublySortedMap, AppendOnlySortedMap } from '../id-compressor/AppendOnlySortedMap';
+
+import { assertNotUndefined, compareFiniteNumbers } from '../Common.js';
+import { AppendOnlyDoublySortedMap, AppendOnlySortedMap } from '../id-compressor/AppendOnlySortedMap.js';
 
 function runAppendOnlyMapTests(mapBuilder: () => AppendOnlySortedMap<number, number>) {
 	it('detects out-of-order keys', () => {
@@ -18,7 +20,7 @@ function runAppendOnlyMapTests(mapBuilder: () => AppendOnlySortedMap<number, num
 		const exception = 'Inserted key must be > all others in the map.';
 		assert.throws(
 			() => map.append(-1, 1),
-			(e) => validateAssertionError(e, exception)
+			(e: Error) => validateAssertionError(e, exception)
 		);
 		map.append(1, 2);
 	});
@@ -187,11 +189,7 @@ describe('AppendOnlySortedMap', () => {
 
 describe('AppendOnlyDoublySortedMap', () => {
 	const mapBuilder = () =>
-		new AppendOnlyDoublySortedMap<number, number, number>(
-			compareFiniteNumbers,
-			(value) => value,
-			compareFiniteNumbers
-		);
+		new AppendOnlyDoublySortedMap<number, number, number>(compareFiniteNumbers, (value) => value, compareFiniteNumbers);
 	runAppendOnlyMapTests(mapBuilder);
 
 	it('detects out-of-order values', () => {
@@ -200,7 +198,7 @@ describe('AppendOnlyDoublySortedMap', () => {
 		const exception = 'Inserted value must be > all others in the map.';
 		assert.throws(
 			() => map.append(1, -1),
-			(e) => validateAssertionError(e, exception)
+			(e: Error) => validateAssertionError(e, exception)
 		);
 		map.append(2, 1);
 	});
@@ -246,7 +244,7 @@ describe('AppendOnlyDoublySortedMap', () => {
 		assertNotUndefined(map.get([1]))[0] = -1; // mutate value
 		assert.throws(
 			() => map.assertValid(),
-			(e) => validateAssertionError(e, 'Values in map must be sorted.')
+			(e: Error) => validateAssertionError(e, 'Values in map must be sorted.')
 		);
 	});
 });

@@ -2,22 +2,24 @@
  * Copyright (c) Microsoft Corporation and contributors. All rights reserved.
  * Licensed under the MIT License.
  */
-import React from "react";
-import { Divider } from "@fluentui/react-components";
 
+import { Divider } from "@fluentui/react-components";
 import {
 	AudienceSummary,
 	GetAudienceSummary,
+	type HasContainerKey,
+	type IDevtoolsMessage,
+	type InboundHandlers,
 	handleIncomingMessage,
-	HasContainerId,
-	IDevtoolsMessage,
-	InboundHandlers,
-} from "@fluid-experimental/devtools-core";
-import { IClient } from "@fluidframework/protocol-definitions";
-import { useMessageRelay } from "../MessageRelayContext";
-import { AudienceStateTable } from "./AudienceStateTable";
-import { AudienceHistoryTable } from "./AudienceHistoryTable";
-import { Waiting } from "./Waiting";
+} from "@fluidframework/devtools-core/internal";
+import type { IClient } from "@fluidframework/driver-definitions";
+import React from "react";
+
+import { useMessageRelay } from "../MessageRelayContext.js";
+
+import { AudienceHistoryTable } from "./AudienceHistoryTable.js";
+import { AudienceStateTable } from "./AudienceStateTable.js";
+import { Waiting } from "./Waiting.js";
 
 // TODOs:
 // - Special annotation for the member elected as the summarizer
@@ -27,13 +29,13 @@ const loggingContext = "EXTENSION(AudienceView)";
 /**
  * {@link AudienceView} input props.
  */
-export type AudienceViewProps = HasContainerId;
+export type AudienceViewProps = HasContainerKey;
 
 /**
  * Displays information about a container's audience.
  */
 export function AudienceView(props: AudienceViewProps): React.ReactElement {
-	const { containerId } = props;
+	const { containerKey } = props;
 
 	const messageRelay = useMessageRelay();
 
@@ -46,7 +48,7 @@ export function AudienceView(props: AudienceViewProps): React.ReactElement {
 		 * Handlers for inbound messages related to Audience
 		 */
 		const inboundMessageHandlers: InboundHandlers = {
-			[AudienceSummary.MessageType]: (untypedMessage) => {
+			[AudienceSummary.MessageType]: async (untypedMessage) => {
 				const message = untypedMessage as AudienceSummary.Message;
 
 				setAudienceData(message.data);
@@ -67,16 +69,12 @@ export function AudienceView(props: AudienceViewProps): React.ReactElement {
 		messageRelay.on("message", messageHandler);
 
 		// Request the current Audience State of the Container
-		messageRelay.postMessage(
-			GetAudienceSummary.createMessage({
-				containerId,
-			}),
-		);
+		messageRelay.postMessage(GetAudienceSummary.createMessage({ containerKey }));
 
 		return (): void => {
 			messageRelay.off("message", messageHandler);
 		};
-	}, [containerId, setAudienceData, messageRelay]);
+	}, [containerKey, setAudienceData, messageRelay]);
 
 	if (audienceData === undefined) {
 		return <Waiting label="Waiting for Audience data." />;
@@ -106,9 +104,7 @@ export function AudienceView(props: AudienceViewProps): React.ReactElement {
 
 			return {
 				clientId: entry.clientId,
-				time: wasChangeToday
-					? changeTimeStamp.toTimeString()
-					: changeTimeStamp.toDateString(),
+				time: wasChangeToday ? changeTimeStamp.toTimeString() : changeTimeStamp.toDateString(),
 				changeKind: entry.changeKind,
 			};
 		})
@@ -141,5 +137,5 @@ export interface TransformedAudienceStateData {
 export interface TransformedAudienceHistoryData {
 	clientId: string;
 	time: string;
-	changeKind: string;
+	changeKind: "joined" | "left";
 }

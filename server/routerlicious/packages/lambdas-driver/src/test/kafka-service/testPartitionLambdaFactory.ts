@@ -22,7 +22,10 @@ export class TestLambda implements IPartitionLambda {
 		private readonly context: IContext,
 	) {}
 
-	public handler(message: IQueuedMessage) {
+	/**
+	 * {@inheritDoc IPartitionLambda.handler}
+	 */
+	public handler(message: IQueuedMessage): undefined {
 		if (this.throwHandler) {
 			throw new Error("Requested failure");
 		}
@@ -56,7 +59,7 @@ export class TestPartitionLambdaFactory extends EventEmitter implements IPartiti
 
 	public async create(config: undefined, context: IContext): Promise<IPartitionLambda> {
 		if (this.failCreate) {
-			return Promise.reject(new Error("Set to fail create"));
+			throw new Error("Set to fail create");
 		}
 
 		const lambda = new TestLambda(this, this.throwHandler, context);

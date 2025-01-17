@@ -40,6 +40,7 @@ export {
 	IDocument,
 	ICheckpoint,
 	IDocumentDetails,
+	IDocumentStaticProperties,
 	IDocumentStorage,
 	IScribe,
 } from "./document";
@@ -55,6 +56,7 @@ export {
 } from "./http";
 export {
 	extractBoxcar,
+	isCompleteBoxcarMessage,
 	IContext,
 	IContextErrorData,
 	ILogger,
@@ -119,6 +121,12 @@ export {
 	shouldRetryNetworkError,
 } from "./runWithRetry";
 export { ISecretManager } from "./secretManager";
+export {
+	ICollaborationSession,
+	ICollaborationSessionClient,
+	ICollaborationSessionManager,
+	ICollaborationSessionTracker,
+} from "./collabSession";
 export { IStorageNameAllocator } from "./storageNameAllocator";
 export { IStorageNameRetriever } from "./storageNameRetriever";
 export {
@@ -129,6 +137,10 @@ export {
 	ITaskMessageSender,
 } from "./taskMessages";
 export {
+	EncryptionKeyVersion,
+	IEncryptedPrivateTenantKeys,
+	IEncryptedTenantKeys,
+	IPlainTextAndEncryptedTenantKeys,
 	ITenant,
 	ITenantConfig,
 	ITenantConfigManager,
@@ -137,6 +149,7 @@ export {
 	ITenantManager,
 	ITenantOrderer,
 	ITenantStorage,
+	ITenantPrivateKeys,
 	KeyName,
 } from "./tenant";
 export {
@@ -148,12 +161,24 @@ export {
 	ThrottlingError,
 } from "./throttler";
 export { TokenGenerator } from "./token";
-export { clientConnectivityStorageId, IUsageData, signalUsageStorageId } from "./usageData";
+export {
+	clientConnectivityStorageId,
+	IUsageData,
+	signalUsageStorageId,
+	httpUsageStorageId,
+} from "./usageData";
 export { IZookeeperClient, ZookeeperClientConstructor } from "./zookeeper";
 export {
-	IWebSocketTracker,
 	ITokenRevocationManager,
+	IRevokedTokenChecker,
 	ITokenRevocationResponse,
+	IRevokeTokenOptions,
 	TokenRevocationError,
+	TokenRevokedError,
 	createCompositeTokenId,
 } from "./tokenRevocationManager";
+export { IServiceMessageResourceManager } from "./serviceMessage";
+export { IClusterDrainingChecker, clusterDrainingRetryTimeInMs } from "./clusterDraining";
+export { IWebSocketTracker } from "./webSocketTracker";
+export { IReadinessCheck, IReadinessStatus, ICheck } from "./readinessCheck";
+export { IFluidAccessToken, IFluidAccessTokenGenerator } from "./fluidAccessTokenGenerator";

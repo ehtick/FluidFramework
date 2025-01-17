@@ -7,6 +7,9 @@ import { CheckpointService, ICollection } from "@fluidframework/server-services-
 import { Lumberjack, getLumberBaseProperties } from "@fluidframework/server-services-telemetry";
 import { FluidServiceError, FluidServiceErrorCode } from "./errorUtils";
 
+/**
+ * @internal
+ */
 export async function deleteSummarizedOps(
 	opCollection: ICollection<unknown>,
 	softDeleteRetentionPeriodMs: number,
@@ -20,7 +23,7 @@ export async function deleteSummarizedOps(
 			`Operation deletion is not enabled`,
 			FluidServiceErrorCode.FeatureDisabled,
 		);
-		return Promise.reject(error);
+		throw error;
 	}
 
 	// Following code would nv
@@ -41,6 +44,14 @@ export async function deleteSummarizedOps(
 				doc.tenantId,
 				doc.documentId,
 			);
+
+			if (realDoc === null) {
+				Lumberjack.error(
+					`Unable to delete ops. Reason: Failed to get latest checkpoint`,
+					lumberjackProperties,
+				);
+				continue;
+			}
 
 			const lastSummarySequenceNumber = JSON.parse(realDoc.scribe).lastSummarySequenceNumber;
 
@@ -81,7 +92,6 @@ export async function deleteSummarizedOps(
 			}
 		} catch (error) {
 			Lumberjack.error(`Error while trying to delete ops`, lumberjackProperties, error);
-			throw error;
 		}
 	}
 }

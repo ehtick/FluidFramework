@@ -2,11 +2,13 @@
  * Copyright (c) Microsoft Corporation and contributors. All rights reserved.
  * Licensed under the MIT License.
  */
-import { IClient } from "@fluidframework/protocol-definitions";
-import { ContainerStateChangeKind } from "./Container";
+
+import type { IClient } from "@fluidframework/driver-definitions";
+
+import type { ContainerStateChangeKind } from "./Container.js";
 
 /**
- * Base interface for data logs, associating data with a timestamp at which the data was recorded by the debugger.
+ * Base interface for data logs, associating data with a timestamp at which the data was recorded by the devtools.
  *
  * @internal
  */
@@ -71,5 +73,5 @@ export interface AudienceChangeLogEntry extends LogEntry {
 	/**
 	 * Whether the change represents a client being added to or removed from the collaborative session.
 	 */
-	changeKind: "added" | "removed";
+	changeKind: "joined" | "left";
 }

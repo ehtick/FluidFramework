@@ -12,7 +12,7 @@ Bumps the version of a release group or package to the next minor, major, or pat
 
 ```
 USAGE
-  $ flub bump PACKAGE_OR_RELEASE_GROUP [-v] [-t major|minor|patch | --exact <value>] [--scheme
+  $ flub bump PACKAGE_OR_RELEASE_GROUP [-v | --quiet] [-t major|minor|patch | --exact <value>] [--scheme
     semver|internal|virtualPatch | ] [--exactDepType ^|~||workspace:*|workspace:^|workspace:~] [-d
     ^|~||workspace:*|workspace:^|workspace:~] [-x | --install | --commit |  |  | ]
 
@@ -28,18 +28,21 @@ FLAGS
   -t, --bumpType=<option>              Bump the release group or package to the next version according to this bump
                                        type.
                                        <options: major|minor|patch>
-  -v, --verbose                        Verbose logging.
   -x, --skipChecks                     Skip all checks.
-  --[no-]commit                        Commit changes to a new branch.
-  --exact=<value>                      An exact string to use as the version. The string must be a valid semver version
+      --[no-]commit                    Commit changes to a new branch.
+      --exact=<value>                  An exact string to use as the version. The string must be a valid semver version
                                        string.
-  --exactDepType=<option>              [DEPRECATED - Use interdependencyRange instead.] Controls the type of dependency
+      --exactDepType=<option>          [DEPRECATED - Use interdependencyRange instead.] Controls the type of dependency
                                        that is used between packages within the release group. Use "" to indicate exact
                                        dependencies.
                                        <options: ^|~||workspace:*|workspace:^|workspace:~>
-  --[no-]install                       Update lockfiles by running 'npm install' automatically.
-  --scheme=<option>                    Override the version scheme used by the release group or package.
+      --[no-]install                   Update lockfiles by running 'npm install' automatically.
+      --scheme=<option>                Override the version scheme used by the release group or package.
                                        <options: semver|internal|virtualPatch>
+
+LOGGING FLAGS
+  -v, --verbose  Enable verbose logging.
+      --quiet    Disable all logging.
 
 DESCRIPTION
   Bumps the version of a release group or package to the next minor, major, or patch version, or to a specific version,
@@ -82,9 +85,10 @@ Update the dependency version of a specified package or release group. That is, 
 
 ```
 USAGE
-  $ flub bump deps PACKAGE_OR_RELEASE_GROUP [-v] [--prerelease -t
+  $ flub bump deps PACKAGE_OR_RELEASE_GROUP [-v | --quiet] [--prerelease -t
     latest|newest|greatest|minor|patch|@next|@canary] [--onlyBumpPrerelease] [-g
     client|server|azure|build-tools|gitrest|historian | -p <value>] [-x | --install | --commit |  |  | ]
+    [--updateChecker ncu|homegrown]
 
 ARGUMENTS
   PACKAGE_OR_RELEASE_GROUP  The name of a package or a release group.
@@ -96,12 +100,22 @@ FLAGS
                                example, both @fluid-tools/markdown-magic and markdown-magic are valid.
   -t, --updateType=<option>    [default: minor] Bump the current version of the dependency according to this bump type.
                                <options: latest|newest|greatest|minor|patch|@next|@canary>
-  -v, --verbose                Verbose logging.
   -x, --skipChecks             Skip all checks.
-  --[no-]commit                Commit changes to a new branch.
-  --[no-]install               Update lockfiles by running 'npm install' automatically.
-  --onlyBumpPrerelease         Only bump dependencies that are on pre-release versions.
-  --prerelease                 Treat prerelease versions as valid versions to update to.
+      --[no-]commit            Commit changes to a new branch.
+      --[no-]install           Update lockfiles by running 'npm install' automatically.
+      --onlyBumpPrerelease     Only bump dependencies that are on pre-release versions.
+      --prerelease             Treat prerelease versions as valid versions to update to.
+
+LOGGING FLAGS
+  -v, --verbose  Enable verbose logging.
+      --quiet    Disable all logging.
+
+EXPERIMENTAL FLAGS
+  --updateChecker=<option>  Specify the implementation to use to update dependencies. The default, 'ncu', uses
+                            npm-check-updates under the covers. The 'homegrown' value is a new experimental updater
+                            written specifically for the Fluid Framework repo. This flag is experimental and may change
+                            or be removed at any time.
+                            <options: ncu|homegrown>
 
 DESCRIPTION
   Update the dependency version of a specified package or release group. That is, if one or more packages in the repo
@@ -130,3 +144,5 @@ EXAMPLES
 
     $ flub bump deps server -t latest
 ```
+
+_See code: [src/commands/bump/deps.ts](https://github.com/microsoft/FluidFramework/blob/main/build-tools/packages/build-cli/src/commands/bump/deps.ts)_

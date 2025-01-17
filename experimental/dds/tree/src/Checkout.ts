@@ -3,24 +3,29 @@
  * Licensed under the MIT License.
  */
 
-import { assert } from '@fluidframework/common-utils';
-import { ChildLogger, EventEmitterWithErrorHandling } from '@fluidframework/telemetry-utils';
-import { IDisposable, IErrorEvent, ITelemetryLogger, ITelemetryProperties } from '@fluidframework/common-definitions';
-import { assertWithMessage, fail, RestOrArray, unwrapRestOrArray } from './Common';
-import { EditId } from './Identifiers';
-import { CachingLogViewer } from './LogViewer';
-import { TreeView } from './TreeView';
-import { RevisionView } from './RevisionView';
-import { EditCommittedHandler, SharedTree } from './SharedTree';
-import { EditingResult, GenericTransaction, TransactionInternal, ValidEditingResult } from './TransactionInternal';
-import { ChangeInternal, Edit, EditStatus } from './persisted-types';
-import { SharedTreeEvent } from './EventTypes';
-import { newEditId } from './EditUtilities';
-import { Change } from './ChangeTypes';
+import { IDisposable, IErrorEvent, ITelemetryBaseProperties } from '@fluidframework/core-interfaces';
+import { assert } from '@fluidframework/core-utils/internal';
+import {
+	ITelemetryLoggerExt,
+	EventEmitterWithErrorHandling,
+	createChildLogger,
+} from '@fluidframework/telemetry-utils/internal';
+
+import { Change } from './ChangeTypes.js';
+import { RestOrArray, assertWithMessage, fail, unwrapRestOrArray } from './Common.js';
+import { newEditId } from './EditUtilities.js';
+import { SharedTreeEvent } from './EventTypes.js';
+import { EditId } from './Identifiers.js';
+import { CachingLogViewer } from './LogViewer.js';
+import { RevisionView } from './RevisionView.js';
+import { EditCommittedHandler, SharedTree } from './SharedTree.js';
+import { EditingResult, GenericTransaction, TransactionInternal, ValidEditingResult } from './TransactionInternal.js';
+import { TreeView } from './TreeView.js';
+import { ChangeInternal, Edit, EditStatus } from './persisted-types/index.js';
 
 /**
  * An event emitted by a `Checkout` to indicate a state change. See {@link ICheckoutEvents} for event argument information.
- * @public
+ * @alpha
  */
 export enum CheckoutEvent {
 	/**
@@ -32,6 +37,7 @@ export enum CheckoutEvent {
 
 /**
  * Events which may be emitted by `Checkout`. See {@link CheckoutEvent} for documentation of event semantics.
+ * @alpha
  */
 export interface ICheckoutEvents extends IErrorEvent {
 	(event: 'viewChange', listener: (before: TreeView, after: TreeView) => void);
@@ -39,7 +45,7 @@ export interface ICheckoutEvents extends IErrorEvent {
 
 /**
  * The result of validation of an Edit.
- * @public
+ * @alpha
  */
 export enum EditValidationResult {
 	/**
@@ -73,7 +79,7 @@ export enum EditValidationResult {
  * Events emitted by `Checkout` are documented in {@link CheckoutEvent}.
  * Exceptions thrown during event handling will be emitted as error events, which are automatically surfaced as error events on the
  * `SharedTree` used at construction time.
- * @public
+ * @alpha
  */
 export abstract class Checkout extends EventEmitterWithErrorHandling<ICheckoutEvents> implements IDisposable {
 	/**
@@ -115,7 +121,7 @@ export abstract class Checkout extends EventEmitterWithErrorHandling<ICheckoutEv
 	 */
 	private currentEdit?: GenericTransaction;
 
-	private readonly logger: ITelemetryLogger;
+	private readonly logger: ITelemetryLoggerExt;
 
 	public disposed: boolean = false;
 
@@ -124,7 +130,7 @@ export abstract class Checkout extends EventEmitterWithErrorHandling<ICheckoutEv
 			this.tree.emit('error', error);
 		});
 		this.tree = tree;
-		this.logger = ChildLogger.create(this.tree.logger, 'Checkout');
+		this.logger = createChildLogger({ logger: this.tree.logger, namespace: 'Checkout' });
 		if (tree.logViewer instanceof CachingLogViewer) {
 			this.cachingLogViewer = tree.logViewer;
 		}
@@ -145,7 +151,6 @@ export abstract class Checkout extends EventEmitterWithErrorHandling<ICheckoutEv
 
 	/**
 	 * @returns true iff there is an open edit.
-	 * @internal
 	 */
 	public hasOpenEdit(): boolean {
 		return this.currentEdit !== undefined;
@@ -197,7 +202,7 @@ export abstract class Checkout extends EventEmitterWithErrorHandling<ICheckoutEv
 		}
 
 		const { failure } = result as { failure: TransactionInternal.Failure };
-		const additionalProps: ITelemetryProperties = {};
+		const additionalProps: ITelemetryBaseProperties = {};
 		switch (failure.kind) {
 			case TransactionInternal.FailureKind.BadPlace:
 				additionalProps.placeFailure = failure.placeFailure;
@@ -320,6 +325,7 @@ export abstract class Checkout extends EventEmitterWithErrorHandling<ICheckoutEv
 
 	/**
 	 * Rebases the ongoing edit to the latest revision loaded by this 'Checkout'.
+	 *
 	 * If the rebase succeeds (none of the changes in the ongoing edit became invalid), the ongoing edit will remain open and the current
 	 * view will reflect those changes.
 	 *
@@ -327,7 +333,8 @@ export abstract class Checkout extends EventEmitterWithErrorHandling<ICheckoutEv
 	 * currentView will return to showing the newest committed revision as it always does when there is no ongoing edit.
 	 *
 	 * Must only be called during an open edit.
-	 * @returns - the result of the rebase.
+	 *
+	 * @returns The result of the rebase.
 	 */
 	public rebaseCurrentEdit(): EditValidationResult.Valid | EditValidationResult.Invalid {
 		assert(this.currentEdit !== undefined, 0x605 /* An edit is not open. */);

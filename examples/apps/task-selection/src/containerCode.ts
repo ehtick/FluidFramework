@@ -3,14 +3,16 @@
  * Licensed under the MIT License.
  */
 
-import { ModelContainerRuntimeFactory } from "@fluid-example/example-utils";
-import { IContainer } from "@fluidframework/container-definitions";
-import { IContainerRuntime } from "@fluidframework/container-runtime-definitions";
-import { requestFluidObject } from "@fluidframework/runtime-utils";
+import {
+	ModelContainerRuntimeFactory,
+	getDataStoreEntryPoint,
+} from "@fluid-example/example-utils";
+import { IContainer } from "@fluidframework/container-definitions/legacy";
+import { IContainerRuntime } from "@fluidframework/container-runtime-definitions/legacy";
 
-import { IDiceRoller } from "./interface";
-import { OldestClientDiceRollerInstantiationFactory } from "./oldestClientDiceRoller";
-import { TaskManagerDiceRollerInstantiationFactory } from "./taskManagerDiceRoller";
+import { IDiceRoller } from "./interface.js";
+import { OldestClientDiceRollerInstantiationFactory } from "./oldestClientDiceRoller.js";
+import { TaskManagerDiceRollerInstantiationFactory } from "./taskManagerDiceRoller.js";
 
 /**
  * The data model for our application.
@@ -64,14 +66,9 @@ export class TaskSelectionContainerRuntimeFactory extends ModelContainerRuntimeF
 	 * {@inheritDoc ModelContainerRuntimeFactory.createModel}
 	 */
 	protected async createModel(runtime: IContainerRuntime, container: IContainer) {
-		const taskManagerDiceRoller = await requestFluidObject<IDiceRoller>(
-			await runtime.getRootDataStore(taskManagerDiceId),
-			"",
+		return new TaskSelectionAppModel(
+			await getDataStoreEntryPoint<IDiceRoller>(runtime, taskManagerDiceId),
+			await getDataStoreEntryPoint<IDiceRoller>(runtime, oldestClientDiceId),
 		);
-		const oldestClientDiceRoller = await requestFluidObject<IDiceRoller>(
-			await runtime.getRootDataStore(oldestClientDiceId),
-			"",
-		);
-		return new TaskSelectionAppModel(taskManagerDiceRoller, oldestClientDiceRoller);
 	}
 }

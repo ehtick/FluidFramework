@@ -3,8 +3,8 @@
  * Licensed under the MIT License.
  */
 
-import { HasContainerId } from "../../CommonInterfaces";
-import { IDevtoolsMessage } from "../Messages";
+import type { HasContainerKey } from "../../CommonInterfaces.js";
+import type { IDevtoolsMessage } from "../Messages.js";
 
 /**
  * Encapsulates types and logic related to {@link ConnectContainer.Message}.
@@ -24,7 +24,7 @@ export namespace ConnectContainer {
 	 *
 	 * @internal
 	 */
-	export type MessageData = HasContainerId;
+	export type MessageData = HasContainerKey;
 
 	/**
 	 * Inbound message requesting that the Container associated with the specified ID be connected (if currently disconnected).

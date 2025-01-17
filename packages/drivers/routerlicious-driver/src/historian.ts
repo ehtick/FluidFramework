@@ -3,16 +3,25 @@
  * Licensed under the MIT License.
  */
 
-import { fromUtf8ToBase64 } from "@fluidframework/common-utils";
-import * as git from "@fluidframework/gitresources";
+import { fromUtf8ToBase64 } from "@fluid-internal/client-utils";
+import type {
+	IGitBlob,
+	IGitCommitDetails,
+	IGitCreateBlobParams,
+	IGitCreateBlobResponse,
+	IGitCreateTreeParams,
+	IGitTree,
+} from "@fluidframework/driver-definitions/internal";
 import {
-	IWholeFlatSummary,
 	IWholeSummaryPayload,
 	IWriteSummaryResponse,
 } from "@fluidframework/server-services-client";
-import { QueryStringType, RestWrapper } from "./restWrapperBase";
-import { IR11sResponse } from "./restWrapper";
-import { IHistorian } from "./storageContracts";
+
+import { IWholeFlatSnapshot } from "./contracts.js";
+import { type QueryStringType } from "./queryStringUtils.js";
+import { IR11sResponse } from "./restWrapper.js";
+import { RestWrapper } from "./restWrapperBase.js";
+import { IHistorian } from "./storageContracts.js";
 
 export interface ICredentials {
 	user: string;
@@ -42,17 +51,17 @@ export class Historian implements IHistorian {
 		}
 	}
 
-	public async getBlob(sha: string): Promise<IR11sResponse<git.IBlob>> {
-		return this.restWrapper.get<git.IBlob>(
+	public async getBlob(sha: string): Promise<IR11sResponse<IGitBlob>> {
+		return this.restWrapper.get<IGitBlob>(
 			`/git/blobs/${encodeURIComponent(sha)}`,
 			this.getQueryString(),
 		);
 	}
 
 	public async createBlob(
-		blob: git.ICreateBlobParams,
-	): Promise<IR11sResponse<git.ICreateBlobResponse>> {
-		return this.restWrapper.post<git.ICreateBlobResponse>(
+		blob: IGitCreateBlobParams,
+	): Promise<IR11sResponse<IGitCreateBlobResponse>> {
+		return this.restWrapper.post<IGitCreateBlobResponse>(
 			`/git/blobs`,
 			blob,
 			this.getQueryString(),
@@ -62,27 +71,27 @@ export class Historian implements IHistorian {
 	public async getCommits(
 		sha: string,
 		count: number,
-	): Promise<IR11sResponse<git.ICommitDetails[]>> {
+	): Promise<IR11sResponse<IGitCommitDetails[]>> {
 		return this.restWrapper
-			.get<git.ICommitDetails[]>(`/commits`, this.getQueryString({ count, sha }))
-			.catch((error) =>
+			.get<IGitCommitDetails[]>(`/commits`, this.getQueryString({ count, sha }))
+			.catch(async (error) =>
 				error.statusCode === 400 || error.statusCode === 404
 					? {
 							content: [],
 							headers: new Map(),
 							propsToLog: {},
 							requestUrl: "",
-					  }
-					: Promise.reject<IR11sResponse<git.ICommitDetails[]>>(error),
+						}
+					: Promise.reject<IR11sResponse<IGitCommitDetails[]>>(error),
 			);
 	}
 
-	public async createTree(tree: git.ICreateTreeParams): Promise<IR11sResponse<git.ITree>> {
-		return this.restWrapper.post<git.ITree>(`/git/trees`, tree, this.getQueryString());
+	public async createTree(tree: IGitCreateTreeParams): Promise<IR11sResponse<IGitTree>> {
+		return this.restWrapper.post<IGitTree>(`/git/trees`, tree, this.getQueryString());
 	}
 
-	public async getTree(sha: string, recursive: boolean): Promise<IR11sResponse<git.ITree>> {
-		return this.restWrapper.get<git.ITree>(
+	public async getTree(sha: string, recursive: boolean): Promise<IR11sResponse<IGitTree>> {
+		return this.restWrapper.get<IGitTree>(
 			`/git/trees/${encodeURIComponent(sha)}`,
 			this.getQueryString({ recursive: recursive ? 1 : 0 }),
 		);
@@ -98,8 +107,8 @@ export class Historian implements IHistorian {
 		);
 	}
 
-	public async getSummary(sha: string): Promise<IR11sResponse<IWholeFlatSummary>> {
-		return this.restWrapper.get<IWholeFlatSummary>(
+	public async getSnapshot(sha: string): Promise<IR11sResponse<IWholeFlatSnapshot>> {
+		return this.restWrapper.get<IWholeFlatSnapshot>(
 			`/git/summaries/${sha}`,
 			this.getQueryString(),
 		);

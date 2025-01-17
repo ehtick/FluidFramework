@@ -4,31 +4,33 @@
  */
 
 import { strict as assert } from 'assert';
-import { benchmark, BenchmarkType } from '@fluid-tools/benchmark';
-import { expect } from 'chai';
+
 import {
 	BaseFuzzTestState,
+	Generator,
+	IRandom,
 	chain,
 	createWeightedGenerator,
-	Generator,
 	generatorFromArray,
-	IRandom,
+	makeRandom,
 	performFuzzActions,
 	take,
-	makeRandom,
-} from '@fluid-internal/stochastic-test-utils';
-import { validateAssertionError } from '@fluidframework/test-runtime-utils';
-import { fail } from '../Common';
-import { isFinalId, isLocalId } from '../id-compressor';
-import { SessionIdNormalizer } from '../id-compressor/SessionIdNormalizer';
-import { FinalCompressedId, LocalCompressedId, SessionSpaceCompressedId } from '../Identifiers';
+} from '@fluid-private/stochastic-test-utils';
+import { BenchmarkType, benchmark } from '@fluid-tools/benchmark';
+import { validateAssertionError } from '@fluidframework/test-runtime-utils/internal';
+import { expect } from 'chai';
+
+import { fail } from '../Common.js';
+import { FinalCompressedId, LocalCompressedId, SessionSpaceCompressedId } from '../Identifiers.js';
+import { SessionIdNormalizer } from '../id-compressor/SessionIdNormalizer.js';
+import { isFinalId, isLocalId } from '../id-compressor/index.js';
 
 describe('SessionIdNormalizer', () => {
 	it('fails when adding finals with no corresponding locals', () => {
 		const normalizer = makeTestNormalizer();
 		assert.throws(
 			() => normalizer.addFinalIds(final(0), final(1), dummy),
-			(e) => validateAssertionError(e, 'Final IDs must be added to an existing local range.')
+			(e: Error) => validateAssertionError(e, 'Final IDs must be added to an existing local range.')
 		);
 	});
 
@@ -37,7 +39,7 @@ describe('SessionIdNormalizer', () => {
 		normalizer.addLocalId();
 		assert.throws(
 			() => normalizer.addFinalIds(final(1), final(0), dummy),
-			(e) => validateAssertionError(e, 'Malformed normalization range.')
+			(e: Error) => validateAssertionError(e, 'Malformed normalization range.')
 		);
 	});
 
@@ -45,13 +47,14 @@ describe('SessionIdNormalizer', () => {
 		const normalizer = makeTestNormalizer();
 		assert.throws(
 			() => normalizer.registerFinalIdBlock(final(0), 5, dummy),
-			(e) => validateAssertionError(e, 'Final ID block should not be registered before any locals.')
+			(e: Error) => validateAssertionError(e, 'Final ID block should not be registered before any locals.')
 		);
 		normalizer.addLocalId();
 		addFinalIds(normalizer, final(0), final(0));
 		assert.throws(
 			() => normalizer.registerFinalIdBlock(final(1), 5, dummy),
-			(e) => validateAssertionError(e, 'Final ID block should not be registered without an existing local range.')
+			(e: Error) =>
+				validateAssertionError(e, 'Final ID block should not be registered without an existing local range.')
 		);
 	});
 
@@ -60,11 +63,11 @@ describe('SessionIdNormalizer', () => {
 		normalizer.addLocalId();
 		assert.throws(
 			() => normalizer.registerFinalIdBlock(final(1), 0, dummy),
-			(e) => validateAssertionError(e, 'Malformed normalization block.')
+			(e: Error) => validateAssertionError(e, 'Malformed normalization block.')
 		);
 		assert.throws(
 			() => normalizer.registerFinalIdBlock(final(1), -1, dummy),
-			(e) => validateAssertionError(e, 'Malformed normalization block.')
+			(e: Error) => validateAssertionError(e, 'Malformed normalization block.')
 		);
 	});
 
@@ -86,7 +89,7 @@ describe('SessionIdNormalizer', () => {
 		addFinalIds(normalizer, final(5), final(5));
 		assert.throws(
 			() => addFinalIds(normalizer, final(9), final(9)),
-			(e) => validateAssertionError(e, 'Gaps in final space must align to a local.')
+			(e: Error) => validateAssertionError(e, 'Gaps in final space must align to a local.')
 		);
 	});
 
@@ -135,7 +138,8 @@ describe('SessionIdNormalizer', () => {
 
 		assert.throws(
 			() => normalizer.registerFinalIdBlock(final(5), 10, dummy),
-			(e) => validateAssertionError(e, 'Final ID block should not be registered without an existing local range.')
+			(e: Error) =>
+				validateAssertionError(e, 'Final ID block should not be registered without an existing local range.')
 		);
 	});
 
@@ -143,18 +147,18 @@ describe('SessionIdNormalizer', () => {
 		const normalizer = makeTestNormalizer();
 		assert.throws(
 			() => normalizer.getFinalId(-1 as LocalCompressedId),
-			(e) => validateAssertionError(e, 'Local ID was never recorded with this normalizer.')
+			(e: Error) => validateAssertionError(e, 'Local ID was never recorded with this normalizer.')
 		);
 		const local = normalizer.addLocalId();
 		const secondLocal = (local - 1) as LocalCompressedId;
 		assert.throws(
 			() => normalizer.getFinalId(secondLocal),
-			(e) => validateAssertionError(e, 'Local ID was never recorded with this normalizer.')
+			(e: Error) => validateAssertionError(e, 'Local ID was never recorded with this normalizer.')
 		);
 		addFinalIds(normalizer, final(0), final(5));
 		assert.throws(
 			() => normalizer.getFinalId(secondLocal),
-			(e) => validateAssertionError(e, 'Local ID was never recorded with this normalizer.')
+			(e: Error) => validateAssertionError(e, 'Local ID was never recorded with this normalizer.')
 		);
 	});
 
@@ -300,7 +304,7 @@ function itWithNormalizer(title: string, itFn: (normalizer: SessionIdNormalizer<
 			prevLocal = localExpected;
 			prevFinal = finalExpected;
 
-			const sessionIdExpected = localExpected === undefined ? finalExpected : localExpected;
+			const sessionIdExpected = localExpected ?? finalExpected;
 			const sessionIdActualAll = allIds[i];
 			const sessionIdActualNormalized =
 				finalExpected === undefined ? localExpected : normalizer.getSessionSpaceId(finalExpected);

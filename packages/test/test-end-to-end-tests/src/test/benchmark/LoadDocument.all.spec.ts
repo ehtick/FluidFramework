@@ -2,16 +2,20 @@
  * Copyright (c) Microsoft Corporation and contributors. All rights reserved.
  * Licensed under the MIT License.
  */
+
 import { strict as assert } from "assert";
-import { IContainer } from "@fluidframework/container-definitions";
-import { ITestObjectProvider } from "@fluidframework/test-utils";
-import { describeE2EDocRun, getCurrentBenchmarkType } from "@fluid-internal/test-version-utils";
+
+import { describeE2EDocRun, getCurrentBenchmarkType } from "@fluid-private/test-version-utils";
+import { IContainer } from "@fluidframework/container-definitions/internal";
+import { delay } from "@fluidframework/core-utils/internal";
+import { ITestObjectProvider } from "@fluidframework/test-utils/internal";
+
 import {
-	benchmarkAll,
-	createDocument,
 	IBenchmarkParameters,
 	IDocumentLoader,
-} from "./DocumentCreator";
+	benchmarkAll,
+	createDocument,
+} from "./DocumentCreator.js";
 
 describeE2EDocRun("Load Document", (getTestObjectProvider, getDocumentInfo) => {
 	let documentWrapper: IDocumentLoader;
@@ -21,16 +25,23 @@ describeE2EDocRun("Load Document", (getTestObjectProvider, getDocumentInfo) => {
 	before(async () => {
 		provider = getTestObjectProvider();
 		const docData = getDocumentInfo(); // returns the type of document to be processed.
+		if (
+			docData.supportedEndpoints &&
+			!docData.supportedEndpoints?.includes(provider.driver.type)
+		) {
+			return;
+		}
 		documentWrapper = createDocument({
 			testName: `Load Document - ${docData.testTitle}`,
 			provider,
 			documentType: docData.documentType,
+			documentTypeInfo: docData.documentTypeInfo,
 			benchmarkType,
 		});
 		await documentWrapper.initializeDocument();
 	});
 
-	beforeEach(async function () {
+	beforeEach("conditionalSkip", async function () {
 		const docData = getDocumentInfo();
 		if (
 			docData.supportedEndpoints &&
@@ -56,8 +67,9 @@ describeE2EDocRun("Load Document", (getTestObjectProvider, getDocumentInfo) => {
 				assert(this.container !== undefined, "container needs to be defined.");
 				this.container.close();
 			}
-			beforeIteration(): void {
+			async before(): Promise<void> {
 				this.container = undefined;
+				await delay(1000);
 			}
 		})(),
 	);

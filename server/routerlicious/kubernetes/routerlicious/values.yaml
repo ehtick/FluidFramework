@@ -1,6 +1,3 @@
-## Fluid image version
-image: prague.azurecr.io/prague-server:latest
-
 ## Specify a imagePullPolicy
 ## ref: http://kubernetes.io/docs/user-guide/images/#pre-pulling-images
 imagePullPolicy: IfNotPresent
@@ -15,12 +12,12 @@ alfred:
   cert: cert
   tenants: []
   key: jwt_key
-  maxNumberOfClientsPerDocument: 1000000
   numberOfMessagesPerTrace: 100
   sessionStickinessDurationMs: 3600000
-  enableConnectionCountLogging: false
+  ignoreEphemeralFlag: true
   throttling:
     restCallsPerTenant:
+      generalRestCall:
         maxPerMs: 1000000
         maxBurst: 1000000
         minCooldownIntervalInMs: 1000000
@@ -28,11 +25,31 @@ alfred:
         maxInMemoryCacheSize: 1000
         maxInMemoryCacheAgeInMs: 60000
         enableEnhancedTelemetry: false
+      createDoc: disabled
+      getDeltas: disabled
+      getSession: disabled
     restCallsPerCluster:
-        createDoc: 
-            maxPerInterval: 1000000
-            intervalInMs: 1000000
-        getDeltas: disabled
+      createDoc:
+        maxPerInterval: 1000000
+        intervalInMs: 1000000
+      getDeltas: disabled
+      getSession: disabled
+    submitOps: disabled
+    submitSignal: disabled
+  enforceServerGeneratedDocumentId: false
+  getDeltasRequestMaxOpsRange: 2000
+
+nexus:
+  name: nexus
+  replicas: 4
+  externalUrl: nexus_external_url
+  host: nexus_host
+  cert: cert
+  tenants: []
+  key: jwt_key
+  maxNumberOfClientsPerDocument: 1000000
+  numberOfMessagesPerTrace: 100
+  throttling:
     socketConnectionsPerTenant: disabled
     socketConnectionsPerCluster: disabled
     submitOps: disabled
@@ -40,116 +57,160 @@ alfred:
   socketIoAdapter:
     enableCustomSocketIoAdapter: true
     shouldDisableDefaultNamespace: false
-  enforceServerGeneratedDocumentId: false
   socketIo:
     perMessageDeflate: true
-    
+    gracefulShutdownEnabled: false
+    pingPongLatencyTrackingEnabled: false
+  enableCollaborationSessionTracking: false
+  enableCollaborationSessionPruning: false
+  redisCollaborationSessionManagerOptions:
+    maxScanBatchSize: 800
+
 storage:
-    enableWholeSummaryUpload: false
-    storageUrl: storage_url
+  enableWholeSummaryUpload: false
+  ephemeralDocumentTTLSec: 86400
+  storageUrl: storage_url
 
 checkpoints:
-    localCheckpointEnabled: false
+  localCheckpointEnabled: false
+  checkpointsTTLInSeconds: -1
+  kafkaCheckpointOnReprocessingOp: false
 
 session:
-    enforceDiscoveryFlow: false
+  enforceDiscoveryFlow: false
 
 deli:
-    name: deli
-    replicas: 8
-    checkpointHeuristics:
-        enable: false
-        idleTime: 10000
-        maxTime: 60000
-        maxMessages: 500
-    restartOnCheckpointFailure: true
+  name: deli
+  replicas: 8
+  checkpointHeuristics:
+    enable: false
+    idleTime: 10000
+    maxTime: 60000
+    maxMessages: 500
+  restartOnCheckpointFailure: true
+  enableEphemeralContainerSummaryCleanup: true
+  enableLeaveOpNoClientServerMetadata: false
+  noOpConsolidationTimeout: 250
 
 scriptorium:
-    name: scriptorium
-    replicas: 8
-    restartOnCheckpointFailure: true
+  name: scriptorium
+  replicas: 8
+  restartOnCheckpointFailure: true
+  logSavedOpsTimeIntervalMs: 60000
+  opsCountTelemetryEnabled: false
+  circuitBreakerEnabled: false
+  circuitBreakerOptions:
+    errorThresholdPercentage: 0.001
+    resetTimeout: 30000
+    timeout: false
+    rollingCountTimeout: 1000
+    rollingCountBuckets: 1000
+    fallbackToRestartTimeoutMs: 180000
+    filterOnErrors: []
 
 scribe:
-    name: scribe
-    replicas: 8
-    getDeltasViaAlfred: true
-    checkpointHeuristics:
-        enable: false
-        idleTime: 10000
-        maxTime: 60000
-        maxMessages: 500
-    restartOnCheckpointFailure: true
-        
+  name: scribe
+  replicas: 8
+  getDeltasViaAlfred: true
+  maxLogtailLength: 2000
+  verifyLastOpPersistence: false
+  disableTransientTenantFiltering: true
+  checkpointHeuristics:
+    enable: false
+    idleTime: 10000
+    maxTime: 60000
+    maxMessages: 500
+  restartOnCheckpointFailure: true
+  scrubUserDataInGlobalCheckpoints: false
+  scrubUserDataInLocalCheckpoints: false
+  scrubUserDataInSummaries: false
+
 riddler:
-    name: riddler
-    replicas: 2
-    tenants: []
+  name: riddler
+  replicas: 2
+  tenants: []
 
 historian:
-    externalUrl: historian_external_url
-    internalUrl: historian_internal_url
+  externalUrl: historian_external_url
+  internalUrl: historian_internal_url
 
 zookeeper:
-    local: false
-    url: zookeeper_url:port
+  local: false
+  url: zookeeper_url:port
 
 system:
-    httpServer:
-        connectionTimeout: 0
+  httpServer:
+    connectionTimeoutMs: 0
 
 usage:
-    clientConnectivityCountingEnabled: false
-    signalUsageCountingEnabled: false
+  clientConnectivityCountingEnabled: false
+  signalUsageCountingEnabled: false
+  httpUsageCountingEnabled: false
 
 shared:
-    transientTenants: []
+  transientTenants: []
+  runnerServerCloseTimeoutMs: 30000
 
 mongodb:
-    operationsDbEndpoint: mongodb_url
-    globalDbEndpoint: mongoglobaldb_url
-    globalDbEnabled: false
-    expireAfterSeconds: -1
-    createCosmosDBIndexes: false
-    bufferMaxEntries: 50
-    softDeletionRetentionPeriodMs: 2592000000
-    offlineWindowMs: 86400000
-    softDeletionEnabled: false
-    permanentDeletionEnabled: false
-    deletionIntervalMs: 3600000
-
-rabbitmq:
-    connectionString: ""
+  operationsDbEndpoint: mongodb_url
+  globalDbEndpoint: mongoglobaldb_url
+  globalDbEnabled: false
+  expireAfterSeconds: 9000 # Note: CosmosDB supports -1 to disable TTL but MongoDB does not
+  createCosmosDBIndexes: false
+  directConnection: true
+  softDeletionRetentionPeriodMs: 2592000000
+  offlineWindowMs: 86400000
+  softDeletionEnabled: false
+  permanentDeletionEnabled: false
+  deletionIntervalMs: 3600000
 
 redis:
-    url: redis_url
-    port: 6379
-    tls: false
+  url: redis_url
+  port: 6379
+  tls: false
 
 redis2:
-    url: redis_url
-    port: 6379
-    tls: false
+  url: redis_url
+  port: 6379
+  tls: false
 
 redisForThrottling:
-    url: redis_url
-    port: 6379
-    tls: false
+  url: redis_url
+  port: 6379
+  tls: false
 
 redisForTenantCache:
-    url: redis_url
-    port: 6379
-    tls: false
+  url: redis_url
+  port: 6379
+  tls: false
 
 kafka:
-    topics:
-        rawdeltas: rawdeltas
-        deltas: deltas
-    url: kafka_url:port
-    libname: rdkafka
+  topics:
+    rawdeltas: rawdeltas
+    deltas: deltas
+  url: kafka_url:port
+  libname: rdkafka
+  customRestartOnKafkaErrorCodes: [-195, -192, -187, -185, -181, 14]
+  seekTimeoutAfterPause: 1000
 
 ingress:
-    class: nginx-prod
+  class: nginx-prod
 
 error:
-    track: true
-    endpoint: "error_tracking_endpoint"
+  track: true
+  endpoint: "error_tracking_endpoint"
+
+lumberjack:
+  options:
+    enableGlobalTelemetryContext: true
+    enableSanitization: false
+
+config:
+  configDumpEnabled: false
+  secretNamesToRedactInConfigDump:
+    - mongo.globalDbEndpoint
+    - mongo.operationsDbEndpoint
+    - redis.pass
+    - redisForTenantCache.pass
+    - redis2.pass
+    - redisForThrottling.pass

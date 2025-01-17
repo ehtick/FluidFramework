@@ -4,21 +4,31 @@
  */
 
 export {
-	ApiItemTransformationConfiguration,
+	type ApiItemTransformationConfiguration,
+	type ApiItemTransformationConfigurationBase,
+	type ApiItemTransformationOptions,
 	getApiItemTransformationConfigurationWithDefaults,
-} from "./Configuration";
+} from "./Configuration.js";
 export {
-	// Consumers should not use this, it exists externally for documentation purposes only.
-	type DefaultDocumentationSuiteOptions,
-	DocumentBoundaries,
-	DocumentationSuiteOptions,
-	getDocumentationSuiteOptionsWithDefaults,
-	HierarchyBoundaries,
-} from "./DocumentationSuiteOptions";
+	type DocumentationSuiteConfiguration,
+	type DefaultDocumentationSuiteConfiguration,
+	type DocumentationSuiteOptions,
+	getDocumentationSuiteConfigurationWithDefaults as getDocumentationSuiteOptionsWithDefaults,
+} from "./DocumentationSuite.js";
 export {
-	ApiItemTransformationOptions,
-	CreateChildContentSections,
-	getApiItemTransformationOptionsWithDefaults,
-	TransformApiItemWithChildren,
-	TransformApiItemWithoutChildren,
-} from "./TransformationOptions";
+	type DocumentationHierarchyConfiguration,
+	type DocumentationHierarchyConfigurationBase,
+	type DocumentHierarchyConfiguration,
+	FolderDocumentPlacement,
+	type FolderHierarchyConfiguration,
+	type HierarchyConfiguration,
+	type HierarchyOptions,
+	HierarchyKind,
+	type SectionHierarchyConfiguration,
+} from "./Hierarchy.js";
+export {
+	type ApiItemTransformations,
+	getApiItemTransformationsWithDefaults,
+	type TransformApiItemWithChildren,
+	type TransformApiItemWithoutChildren,
+} from "./Transformations.js";

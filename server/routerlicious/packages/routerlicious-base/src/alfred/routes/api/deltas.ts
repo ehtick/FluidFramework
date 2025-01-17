@@ -4,16 +4,18 @@
  */
 
 import {
+	ICache,
 	IDeltaService,
+	IRevokedTokenChecker,
 	ITenantManager,
 	IThrottler,
-	ITokenRevocationManager,
 } from "@fluidframework/server-services-core";
 import {
 	verifyStorageToken,
 	throttle,
 	IThrottleMiddlewareOptions,
 	getParam,
+	getBooleanFromConfig,
 } from "@fluidframework/server-services-utils";
 import { validateRequestParams, handleResponse } from "@fluidframework/server-services";
 import { Router } from "express";
@@ -29,10 +31,13 @@ export function create(
 	appTenants: IAlfredTenant[],
 	tenantThrottlers: Map<string, IThrottler>,
 	clusterThrottlers: Map<string, IThrottler>,
-	tokenManager?: ITokenRevocationManager,
+	jwtTokenCache?: ICache,
+	revokedTokenChecker?: IRevokedTokenChecker,
 ): Router {
 	const deltasCollectionName = config.get("mongo:collectionNames:deltas");
 	const rawDeltasCollectionName = config.get("mongo:collectionNames:rawdeltas");
+	const getDeltasRequestMaxOpsRange =
+		(config.get("alfred:getDeltasRequestMaxOpsRange") as number) ?? 2000;
 	const router: Router = Router();
 
 	const tenantThrottleOptions: Partial<IThrottleMiddlewareOptions> = {
@@ -51,7 +56,22 @@ export function create(
 		throttleIdSuffix: Constants.alfredRestThrottleIdSuffix,
 	};
 
-	function stringToSequenceNumber(value: any): number {
+	// Jwt token cache
+	const enableJwtTokenCache: boolean = getBooleanFromConfig(
+		"alfred:jwtTokenCache:enable",
+		config,
+	);
+
+	const defaultTokenValidationOptions = {
+		requireDocumentId: true,
+		ensureSingleUseToken: false,
+		singleUseTokenCache: undefined,
+		enableTokenCache: enableJwtTokenCache,
+		tokenCache: jwtTokenCache,
+		revokedTokenChecker,
+	};
+
+	function stringToSequenceNumber(value: any): number | undefined {
 		if (typeof value !== "string") {
 			return undefined;
 		}
@@ -66,18 +86,19 @@ export function create(
 	router.get(
 		["/v1/:tenantId/:id", "/:tenantId/:id/v1"],
 		validateRequestParams("tenantId", "id"),
-		verifyStorageToken(tenantManager, config, tokenManager),
 		throttle(generalTenantThrottler, winston, tenantThrottleOptions),
+		verifyStorageToken(tenantManager, config, defaultTokenValidationOptions),
 		(request, response, next) => {
 			const from = stringToSequenceNumber(request.query.from);
 			const to = stringToSequenceNumber(request.query.to);
-			const tenantId = getParam(request.params, "tenantId") || appTenants[0].id;
+			const tenantId = request.params.tenantId || appTenants[0].id;
+			const documentId = request.params.id;
 
 			// Query for the deltas and return a filtered version of just the operations field
 			const deltasP = deltaService.getDeltasFromSummaryAndStorage(
 				deltasCollectionName,
 				tenantId,
-				getParam(request.params, "id"),
+				documentId,
 				from,
 				to,
 			);
@@ -92,17 +113,14 @@ export function create(
 	router.get(
 		"/raw/:tenantId/:id",
 		validateRequestParams("tenantId", "id"),
-		verifyStorageToken(tenantManager, config, tokenManager),
 		throttle(generalTenantThrottler, winston, tenantThrottleOptions),
+		verifyStorageToken(tenantManager, config, defaultTokenValidationOptions),
 		(request, response, next) => {
-			const tenantId = getParam(request.params, "tenantId") || appTenants[0].id;
+			const tenantId = request.params.tenantId || appTenants[0].id;
+			const documentId = request.params.id;
 
 			// Query for the raw deltas (no from/to since we want all of them)
-			const deltasP = deltaService.getDeltas(
-				rawDeltasCollectionName,
-				tenantId,
-				getParam(request.params, "id"),
-			);
+			const deltasP = deltaService.getDeltas(rawDeltasCollectionName, tenantId, documentId);
 
 			handleResponse(deltasP, response, undefined, 500);
 		},
@@ -124,19 +142,31 @@ export function create(
 			winston,
 			getDeltasTenantThrottleOptions,
 		),
-		verifyStorageToken(tenantManager, config, tokenManager),
+		verifyStorageToken(tenantManager, config, defaultTokenValidationOptions),
 		(request, response, next) => {
-			const from = stringToSequenceNumber(request.query.from);
-			const to = stringToSequenceNumber(request.query.to);
-			const tenantId = getParam(request.params, "tenantId") || appTenants[0].id;
+			const documentId = request.params.id;
+			let from = stringToSequenceNumber(request.query.from);
+			let to = stringToSequenceNumber(request.query.to);
+			if (from === undefined && to === undefined) {
+				from = 0;
+				to = from + getDeltasRequestMaxOpsRange + 1;
+			} else if (to === undefined && from !== undefined) {
+				to = from + getDeltasRequestMaxOpsRange + 1;
+			} else if (from === undefined && to !== undefined) {
+				from = Math.max(0, to - getDeltasRequestMaxOpsRange - 1);
+			}
+
+			const tenantId = request.params.tenantId || appTenants[0].id;
+			const caller = request.query.caller?.toString();
 
 			// Query for the deltas and return a filtered version of just the operations field
 			const deltasP = deltaService.getDeltas(
 				deltasCollectionName,
 				tenantId,
-				getParam(request.params, "id"),
+				documentId,
 				from,
 				to,
+				caller,
 			);
 
 			handleResponse(deltasP, response, undefined, 500);

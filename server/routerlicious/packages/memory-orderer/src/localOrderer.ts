@@ -38,6 +38,7 @@ import {
 	ICheckpointRepository,
 	CheckpointService,
 } from "@fluidframework/server-services-core";
+import { getLumberBaseProperties, Lumberjack } from "@fluidframework/server-services-telemetry";
 import { ILocalOrdererSetup } from "./interfaces";
 import { LocalContext } from "./localContext";
 import { LocalKafka } from "./localKafka";
@@ -50,10 +51,19 @@ const DefaultScribe: IScribe = {
 	lastClientSummaryHead: undefined,
 	logOffset: -1,
 	minimumSequenceNumber: -1,
-	protocolState: undefined,
+	protocolState: {
+		members: [],
+		minimumSequenceNumber: 0,
+		proposals: [],
+		sequenceNumber: 0,
+		values: [],
+	},
 	sequenceNumber: -1,
 	lastSummarySequenceNumber: 0,
 	validParentSummaries: undefined,
+	isCorrupt: false,
+	protocolHead: undefined,
+	checkpointTimestamp: Date.now(),
 };
 
 const DefaultDeli: IDeliState = {
@@ -65,7 +75,6 @@ const DefaultDeli: IDeliState = {
 	signalClientConnectionNumber: 0,
 	lastSentMSN: 0,
 	nackMessages: undefined,
-	successfullyStartedLambdas: [],
 	checkpointTimestamp: undefined,
 };
 
@@ -87,6 +96,7 @@ class LocalSocketPublisher implements IPublisher {
 
 /**
  * Performs local ordering of messages based on an in-memory stream of operations.
+ * @internal
  */
 export class LocalOrderer implements IOrderer {
 	public static async load(
@@ -139,8 +149,8 @@ export class LocalOrderer implements IOrderer {
 		);
 	}
 
-	public rawDeltasKafka: LocalKafka;
-	public deltasKafka: LocalKafka;
+	public rawDeltasKafka!: LocalKafka;
+	public deltasKafka!: LocalKafka;
 
 	public scriptoriumLambda: LocalLambdaController | undefined;
 	public moiraLambda: LocalLambdaController | undefined;
@@ -237,7 +247,9 @@ export class LocalOrderer implements IOrderer {
 			this.scriptoriumContext,
 			async (lambdaSetup, context) => {
 				const deltasCollection = await lambdaSetup.deltaCollectionP();
-				return new ScriptoriumLambda(deltasCollection, context, undefined);
+				return new ScriptoriumLambda(deltasCollection, context, undefined, async () =>
+					Promise.resolve(),
+				);
 			},
 		);
 
@@ -288,9 +300,7 @@ export class LocalOrderer implements IOrderer {
 					this.rawDeltasKafka,
 					this.serviceConfiguration,
 					undefined,
-					undefined,
 					checkpointService,
-					true,
 				);
 			},
 		);
@@ -341,18 +351,23 @@ export class LocalOrderer implements IOrderer {
 			() => -1,
 		);
 
+		if (!this.gitManager) {
+			throw new Error("Git manager is required to start scribe lambda.");
+		}
+
 		const summaryReader = new SummaryReader(
 			this.tenantId,
 			this.documentId,
 			this.gitManager,
 			false,
+			this.details.value.isEphemeralContainer,
 		);
 		const latestSummary = await summaryReader.readLastSummary();
 		const summaryWriter = new SummaryWriter(
 			this.tenantId,
 			this.documentId,
 			this.gitManager,
-			null /* deltaService */,
+			undefined /* deltaService */,
 			scribeMessagesCollection,
 			false /* enableWholeSummaryUpload */,
 			latestSummary.messages,
@@ -371,10 +386,13 @@ export class LocalOrderer implements IOrderer {
 			this.documentId,
 			documentRepository,
 			scribeMessagesCollection,
-			null /* deltaService */,
+			undefined /* deltaService */,
 			false /* getDeltasViaAlfred */,
+			false /* verifyLastOpPersistence */,
 			checkpointService,
 		);
+
+		const maxPendingCheckpointMessagesLength = 2000;
 
 		return new ScribeLambda(
 			context,
@@ -392,33 +410,66 @@ export class LocalOrderer implements IOrderer {
 			undefined,
 			new Set<string>(),
 			true,
+			true,
+			true,
+			this.details.value.isEphemeralContainer ?? false,
+			checkpointService.getLocalCheckpointEnabled(),
+			maxPendingCheckpointMessagesLength,
 		);
 	}
 
 	private startLambdas() {
+		const lumberjackProperties = {
+			...getLumberBaseProperties(this.documentId, this.tenantId),
+		};
 		if (this.deliLambda) {
-			// eslint-disable-next-line @typescript-eslint/no-floating-promises
-			this.deliLambda.start();
+			this.deliLambda.start().catch((err) => {
+				Lumberjack.error(
+					"Error starting memory orderer deli lambda",
+					lumberjackProperties,
+					err,
+				);
+			});
 		}
 
 		if (this.scriptoriumLambda) {
-			// eslint-disable-next-line @typescript-eslint/no-floating-promises
-			this.scriptoriumLambda.start();
+			this.scriptoriumLambda.start().catch((err) => {
+				Lumberjack.error(
+					"Error starting memory orderer scriptorium lambda",
+					lumberjackProperties,
+					err,
+				);
+			});
 		}
 
 		if (this.scribeLambda) {
-			// eslint-disable-next-line @typescript-eslint/no-floating-promises
-			this.scribeLambda.start();
+			this.scribeLambda.start().catch((err) => {
+				Lumberjack.error(
+					"Error starting memory orderer scribe lambda",
+					lumberjackProperties,
+					err,
+				);
+			});
 		}
 
 		if (this.broadcasterLambda) {
-			// eslint-disable-next-line @typescript-eslint/no-floating-promises
-			this.broadcasterLambda.start();
+			this.broadcasterLambda.start().catch((err) => {
+				Lumberjack.error(
+					"Error starting memory orderer broadcaster lambda",
+					lumberjackProperties,
+					err,
+				);
+			});
 		}
 
 		if (this.moiraLambda) {
-			// eslint-disable-next-line @typescript-eslint/no-floating-promises
-			this.moiraLambda.start();
+			this.moiraLambda.start().catch((err) => {
+				Lumberjack.error(
+					"Error starting memory orderer moira lambda",
+					lumberjackProperties,
+					err,
+				);
+			});
 		}
 	}
 

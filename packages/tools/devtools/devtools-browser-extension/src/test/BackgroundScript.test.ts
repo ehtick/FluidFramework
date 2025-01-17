@@ -3,54 +3,37 @@
  * Licensed under the MIT License.
  */
 
-import { expect } from "chai";
-import Proxyquire from "proxyquire";
-import { createSandbox } from "sinon";
-
-import { delay } from "@fluidframework/common-utils";
+import { delay } from "@fluidframework/core-utils/internal";
 import {
 	CloseContainer,
 	TelemetryEvent,
 	devtoolsMessageSource,
-} from "@fluid-experimental/devtools-core";
+} from "@fluidframework/devtools-core/internal";
+import { expect } from "chai";
+import { createSandbox } from "sinon";
 
-import { Globals } from "../utilities";
-import { DevToolsInitMessage, extensionMessageSource } from "../messaging";
-import { awaitListener, stubGlobals, stubPort } from "./Utilities";
+// eslint-disable-next-line import/no-internal-modules
+import { runBackgroundScript } from "../background/BackgroundScriptContent.js";
+import { type DevToolsInitMessage, extensionViewMessageSource } from "../messaging/index.js";
+
+import { awaitListener, stubGlobals, stubPort } from "./Utilities.js";
 
 type Port = chrome.runtime.Port;
 
-const proxyquire = Proxyquire.noCallThru();
-
-const backgroundScriptPath = "../background/BackgroundScript"; // Relative to this file
-
-/**
- * Require the background script using the provided `browser` APIs.
- */
-const loadBackgroundScript = (globals: Globals): void => {
-	proxyquire(backgroundScriptPath, {
-		"../utilities/Globals": {
-			...globals,
-		} as unknown,
-	});
-};
-
-describe("Background script unit tests", () => {
+describe("Background Script unit tests", () => {
 	const sandbox = createSandbox();
 
-	let globals: Globals = stubGlobals();
+	let { browser } = stubGlobals();
 
 	afterEach(() => {
 		sandbox.reset();
-		globals = stubGlobals(); // Reset globals to ensure test-local modifications are cleared
+		browser = stubGlobals().browser; // Reset globals to ensure test-local modifications are cleared
 	});
 
 	it("Registers `onConnect` listener on load", async () => {
-		const { browser } = globals;
-
 		const onConnectListenerPromise = awaitListener(sandbox, browser.runtime.onConnect);
 
-		loadBackgroundScript(globals);
+		runBackgroundScript(browser);
 
 		const onConnectListener = await onConnectListenerPromise;
 
@@ -58,7 +41,6 @@ describe("Background script unit tests", () => {
 	});
 
 	it("Injects connects to the Content script upon initialization from Devtools script.", async () => {
-		const { browser } = globals;
 		const tabId = 37;
 
 		const devtoolsPort = stubPort("devtools-port");
@@ -81,7 +63,7 @@ describe("Background script unit tests", () => {
 		): Port => {
 			connectCalled = true;
 			expect(_tabId).to.equal(tabId);
-			expect(connectionInfo).to.deep.equal({ name: "Content Script" });
+			expect(connectionInfo).to.deep.equal({ name: "Background-Content-Port" });
 			return tabPort;
 		};
 
@@ -89,7 +71,7 @@ describe("Background script unit tests", () => {
 		const onConnectListenerPromise = awaitListener(sandbox, browser.runtime.onConnect);
 
 		// Load the background script (with stubbed `onConnect`)
-		loadBackgroundScript(globals);
+		runBackgroundScript(browser);
 
 		// Wait for onConnect handler to be registered by background script
 		const onConnectListener = await onConnectListenerPromise;
@@ -108,7 +90,7 @@ describe("Background script unit tests", () => {
 			data: {
 				tabId,
 			},
-			source: extensionMessageSource,
+			source: extensionViewMessageSource,
 		};
 		onMessageListener(devtoolsInitMessage, devtoolsPort);
 
@@ -129,7 +111,7 @@ describe("Background script unit tests", () => {
 	 * Initializes the Background script with stubbed Content and Devtools script ports.
 	 * Returns the stubbed ports for interaction in tests.
 	 */
-	async function initializeBackgroundScript(browser: typeof chrome): Promise<StubbedConnection> {
+	async function initializeBackgroundScript(): Promise<StubbedConnection> {
 		const tabId = 37;
 		const tabPort = stubPort("tab-port");
 
@@ -150,14 +132,17 @@ describe("Background script unit tests", () => {
 		const onConnectListenerPromise = awaitListener(sandbox, browser.runtime.onConnect);
 
 		// Load the background script (with stubbed `onConnect`)
-		loadBackgroundScript(globals);
+		runBackgroundScript(browser);
 
 		// Wait for onConnect handler to be registered by background script
 		const connectFromDevtools = await onConnectListenerPromise;
 		expect(typeof connectFromDevtools).to.equal("function");
 
 		// Wait for the Background script to register `onMessage`  listener with the Devtools port.
-		const onMessageFromDevtoolsListenerPromise = awaitListener(sandbox, devtoolsPort.onMessage);
+		const onMessageFromDevtoolsListenerPromise = awaitListener(
+			sandbox,
+			devtoolsPort.onMessage,
+		);
 
 		// Simulate background script connection init from the devtools
 		connectFromDevtools(devtoolsPort);
@@ -174,7 +159,7 @@ describe("Background script unit tests", () => {
 			data: {
 				tabId,
 			},
-			source: extensionMessageSource,
+			source: extensionViewMessageSource,
 		};
 		sendMessageFromDevtools(devtoolsInitMessage, devtoolsPort);
 
@@ -196,9 +181,7 @@ describe("Background script unit tests", () => {
 	}
 
 	it("Forwards Devtools message from Tab to Devtools script", async () => {
-		const { browser } = globals;
-
-		const { devtoolsPort, tabPort } = await initializeBackgroundScript(browser);
+		const { devtoolsPort, tabPort } = await initializeBackgroundScript();
 
 		// Spy on the Devtools port's `postMessage` so we can later verify it was called.
 		const devtoolsPostMessageSpy = sandbox.spy(devtoolsPort, "postMessage");
@@ -215,9 +198,7 @@ describe("Background script unit tests", () => {
 	});
 
 	it("Does not forward message with unrecognized source from Tab to Devtools script", async () => {
-		const { browser } = globals;
-
-		const { devtoolsPort, tabPort } = await initializeBackgroundScript(browser);
+		const { devtoolsPort, tabPort } = await initializeBackgroundScript();
 
 		// Spy on the Devtools port's `postMessage` so we can later verify if it was called.
 		const devtoolsPostMessageSpy = sandbox.spy(devtoolsPort, "postMessage");
@@ -234,9 +215,7 @@ describe("Background script unit tests", () => {
 	});
 
 	it("Forwards Devtools message from Devtools script to Tab", async () => {
-		const { browser } = globals;
-
-		const { devtoolsPort, tabPort } = await initializeBackgroundScript(browser);
+		const { devtoolsPort, tabPort } = await initializeBackgroundScript();
 
 		// Spy on the Devtools port's `postMessage` so we can later verify it was called.
 		const tabPostMessageSpy = sandbox.spy(tabPort, "postMessage");
@@ -244,7 +223,7 @@ describe("Background script unit tests", () => {
 		// Post message from the Tab
 		const devtoolsMessage = {
 			...CloseContainer.createMessage({} as unknown as CloseContainer.MessageData),
-			source: extensionMessageSource,
+			source: extensionViewMessageSource,
 		};
 		devtoolsPort.postMessage(devtoolsMessage);
 
@@ -253,9 +232,7 @@ describe("Background script unit tests", () => {
 	});
 
 	it("Does not forward message with unrecognized source from Devtools script to Tab", async () => {
-		const { browser } = globals;
-
-		const { devtoolsPort, tabPort } = await initializeBackgroundScript(browser);
+		const { devtoolsPort, tabPort } = await initializeBackgroundScript();
 
 		// Spy on the Devtools port's `postMessage` so we can later verify if it was called.
 		const tabPostMessageSpy = sandbox.spy(tabPort, "postMessage");

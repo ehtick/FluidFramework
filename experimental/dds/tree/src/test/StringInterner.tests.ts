@@ -4,9 +4,11 @@
  */
 
 import { strict as assert } from 'assert';
+
+import { validateAssertionError } from '@fluidframework/test-runtime-utils/internal';
 import { expect } from 'chai';
-import { validateAssertionError } from '@fluidframework/test-runtime-utils';
-import { MutableStringInterner } from '../StringInterner';
+
+import { MutableStringInterner } from '../StringInterner.js';
 
 describe('MutableStringInterner', () => {
 	const inputStrings = ['test', 'test2', 'test3', 'test4'];
@@ -51,7 +53,7 @@ describe('MutableStringInterner', () => {
 
 		assert.throws(
 			() => interner.getString(0),
-			(e) => validateAssertionError(e, 'No string associated with 0.')
+			(e: Error) => validateAssertionError(e, 'No string associated with 0.')
 		);
 	});
 

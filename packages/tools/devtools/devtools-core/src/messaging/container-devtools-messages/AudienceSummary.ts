@@ -3,10 +3,10 @@
  * Licensed under the MIT License.
  */
 
-import { HasContainerId } from "../../CommonInterfaces";
-import { AudienceChangeLogEntry } from "../../Logs";
-import { AudienceClientMetadata } from "../../AudienceMetadata";
-import { IDevtoolsMessage } from "../Messages";
+import type { AudienceClientMetadata } from "../../AudienceMetadata.js";
+import type { HasContainerKey } from "../../CommonInterfaces.js";
+import type { AudienceChangeLogEntry } from "../../Logs.js";
+import type { IDevtoolsMessage } from "../Messages.js";
 
 /**
  * Encapsulates types and logic related to {@link AudienceSummary.Message}.
@@ -26,7 +26,7 @@ export namespace AudienceSummary {
 	 *
 	 * @internal
 	 */
-	export interface MessageData extends HasContainerId {
+	export interface MessageData extends HasContainerKey {
 		/**
 		 * Id of the client connected to the container
 		 */

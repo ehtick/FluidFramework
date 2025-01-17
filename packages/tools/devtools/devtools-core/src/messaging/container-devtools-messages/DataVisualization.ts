@@ -3,9 +3,9 @@
  * Licensed under the MIT License.
  */
 
-import { HasContainerId, HasFluidObjectId } from "../../CommonInterfaces";
-import { FluidObjectNode } from "../../data-visualization";
-import { IDevtoolsMessage } from "../Messages";
+import type { HasContainerKey, HasFluidObjectId } from "../../CommonInterfaces.js";
+import type { FluidObjectNode } from "../../data-visualization/index.js";
+import type { IDevtoolsMessage } from "../Messages.js";
 
 /**
  * Encapsulates types and logic related to {@link DataVisualization.Message}.
@@ -25,11 +25,11 @@ export namespace DataVisualization {
 	 *
 	 * @internal
 	 */
-	export interface MessageData extends HasContainerId, HasFluidObjectId {
+	export interface MessageData extends HasContainerKey, HasFluidObjectId {
 		/**
 		 * A visual description tree for a particular DDS.
 		 *
-		 * Will be undefined only if the debugger has no data associated with the provided
+		 * Will be undefined only if the devtools has no data associated with the provided
 		 * {@link HasFluidObjectId.fluidObjectId | ID}.
 		 */
 		visualization: FluidObjectNode | undefined;

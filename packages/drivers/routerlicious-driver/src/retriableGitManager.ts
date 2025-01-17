@@ -3,41 +3,48 @@
  * Licensed under the MIT License.
  */
 
-import type * as git from "@fluidframework/gitresources";
+import type {
+	IGitCommitDetails,
+	IGitBlob,
+	IGitCreateBlobResponse,
+	IGitCreateTreeParams,
+	IGitTree,
+} from "@fluidframework/driver-definitions/internal";
+import { runWithRetry } from "@fluidframework/driver-utils/internal";
 import {
-	IWholeFlatSummary,
 	IWholeSummaryPayload,
 	IWriteSummaryResponse,
 } from "@fluidframework/server-services-client";
-import { runWithRetry } from "@fluidframework/driver-utils";
-import { ITelemetryLogger } from "@fluidframework/common-definitions";
-import { IGitManager } from "./storageContracts";
-import { IR11sResponse } from "./restWrapper";
+import { ITelemetryLoggerExt } from "@fluidframework/telemetry-utils/internal";
+
+import { IWholeFlatSnapshot } from "./contracts.js";
+import { IR11sResponse } from "./restWrapper.js";
+import { IGitManager } from "./storageContracts.js";
 
 export class RetriableGitManager implements IGitManager {
 	constructor(
 		private readonly internalGitManager: IGitManager,
-		private readonly logger: ITelemetryLogger,
+		private readonly logger: ITelemetryLoggerExt,
 	) {}
 
 	public async getCommits(
 		sha: string,
 		count: number,
-	): Promise<IR11sResponse<git.ICommitDetails[]>> {
+	): Promise<IR11sResponse<IGitCommitDetails[]>> {
 		return this.runWithRetry(
 			async () => this.internalGitManager.getCommits(sha, count),
 			"gitManager_getCommits",
 		);
 	}
 
-	public async getTree(root: string, recursive: boolean): Promise<IR11sResponse<git.ITree>> {
+	public async getTree(root: string, recursive: boolean): Promise<IR11sResponse<IGitTree>> {
 		return this.runWithRetry(
 			async () => this.internalGitManager.getTree(root, recursive),
 			"gitManager_getTree",
 		);
 	}
 
-	public async getBlob(sha: string): Promise<IR11sResponse<git.IBlob>> {
+	public async getBlob(sha: string): Promise<IR11sResponse<IGitBlob>> {
 		return this.runWithRetry(
 			async () => this.internalGitManager.getBlob(sha),
 			"gitManager_getBlob",
@@ -47,14 +54,14 @@ export class RetriableGitManager implements IGitManager {
 	public async createBlob(
 		content: string,
 		encoding: string,
-	): Promise<IR11sResponse<git.ICreateBlobResponse>> {
+	): Promise<IR11sResponse<IGitCreateBlobResponse>> {
 		return this.runWithRetry(
 			async () => this.internalGitManager.createBlob(content, encoding),
 			"gitManager_createBlob",
 		);
 	}
 
-	public async createGitTree(params: git.ICreateTreeParams): Promise<IR11sResponse<git.ITree>> {
+	public async createGitTree(params: IGitCreateTreeParams): Promise<IR11sResponse<IGitTree>> {
 		return this.runWithRetry(
 			async () => this.internalGitManager.createGitTree(params),
 			"gitManager_createGitTree",
@@ -70,9 +77,9 @@ export class RetriableGitManager implements IGitManager {
 		);
 	}
 
-	public async getSummary(sha: string): Promise<IR11sResponse<IWholeFlatSummary>> {
+	public async getSnapshot(sha: string): Promise<IR11sResponse<IWholeFlatSnapshot>> {
 		return this.runWithRetry(
-			async () => this.internalGitManager.getSummary(sha),
+			async () => this.internalGitManager.getSnapshot(sha),
 			"gitManager_getSummary",
 		);
 	}

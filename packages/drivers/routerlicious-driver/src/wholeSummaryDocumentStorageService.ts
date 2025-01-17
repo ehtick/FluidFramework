@@ -3,50 +3,44 @@
  * Licensed under the MIT License.
  */
 
-import type { ITelemetryLogger } from "@fluidframework/common-definitions";
-import {
-	assert,
-	performance,
-	stringToBuffer,
-	Uint8ArrayToString,
-} from "@fluidframework/common-utils";
-import { getW3CData, promiseRaceWithWinner } from "@fluidframework/driver-base";
+import { Uint8ArrayToString, performance, stringToBuffer } from "@fluid-internal/client-utils";
+import { assert } from "@fluidframework/core-utils/internal";
+import { getW3CData, promiseRaceWithWinner } from "@fluidframework/driver-base/internal";
+import { ISummaryHandle, ISummaryTree } from "@fluidframework/driver-definitions";
 import {
 	IDocumentStorageService,
-	ISummaryContext,
 	IDocumentStorageServicePolicies,
-} from "@fluidframework/driver-definitions";
-import {
+	ISummaryContext,
 	ICreateBlobResponse,
 	ISnapshotTree,
-	ISummaryHandle,
-	ISummaryTree,
 	IVersion,
-} from "@fluidframework/protocol-definitions";
-import { IWholeFlatSummary } from "@fluidframework/server-services-client";
-import { PerformanceEvent } from "@fluidframework/telemetry-utils";
-import { ICache, InMemoryCache } from "./cache";
-import { IRouterliciousDriverPolicies } from "./policies";
+} from "@fluidframework/driver-definitions/internal";
+import {
+	ITelemetryLoggerExt,
+	MonitoringContext,
+	PerformanceEvent,
+	createChildMonitoringContext,
+} from "@fluidframework/telemetry-utils/internal";
+
+import { ICache, InMemoryCache } from "./cache.js";
+import { INormalizedWholeSnapshot, IWholeFlatSnapshot } from "./contracts.js";
+import { GitManager } from "./gitManager.js";
+import { IRouterliciousDriverPolicies } from "./policies.js";
+import { convertWholeFlatSnapshotToSnapshotTreeAndBlobs } from "./r11sSnapshotParser.js";
+import { IR11sResponse } from "./restWrapper.js";
+import { ISummaryUploadManager } from "./storageContracts.js";
 import {
 	convertSnapshotAndBlobsToSummaryTree,
 	evalBlobsAndTrees,
 	validateBlobsAndTrees,
-} from "./treeUtils";
-import { GitManager } from "./gitManager";
-import { WholeSummaryUploadManager } from "./wholeSummaryUploadManager";
-import { ISummaryUploadManager } from "./storageContracts";
-import { IR11sResponse } from "./restWrapper";
-import { INormalizedWholeSummary } from "./contracts";
-import { convertWholeFlatSummaryToSnapshotTreeAndBlobs } from "./r11sSnapshotParser";
+} from "./treeUtils.js";
+import { WholeSummaryUploadManager } from "./wholeSummaryUploadManager.js";
 
 const latestSnapshotId: string = "latest";
 
 export class WholeSummaryDocumentStorageService implements IDocumentStorageService {
+	private readonly mc: MonitoringContext;
 	private firstVersionsCall: boolean = true;
-
-	public get repositoryUrl(): string {
-		return "";
-	}
 
 	private async getSummaryUploadManager(): Promise<ISummaryUploadManager> {
 		const manager = await this.getStorageManager();
@@ -56,11 +50,11 @@ export class WholeSummaryDocumentStorageService implements IDocumentStorageServi
 	constructor(
 		protected readonly id: string,
 		protected readonly manager: GitManager,
-		protected readonly logger: ITelemetryLogger,
+		protected readonly logger: ITelemetryLoggerExt,
 		public readonly policies: IDocumentStorageServicePolicies,
 		private readonly driverPolicies?: IRouterliciousDriverPolicies,
 		private readonly blobCache: ICache<ArrayBufferLike> = new InMemoryCache(),
-		private readonly snapshotTreeCache: ICache<INormalizedWholeSummary> = new InMemoryCache(),
+		private readonly snapshotTreeCache: ICache<INormalizedWholeSnapshot> = new InMemoryCache(),
 		private readonly noCacheGitManager?: GitManager,
 		private readonly getStorageManager: (
 			disableCache?: boolean,
@@ -68,8 +62,13 @@ export class WholeSummaryDocumentStorageService implements IDocumentStorageServi
 			disableCache && this.noCacheGitManager !== undefined
 				? this.noCacheGitManager
 				: this.manager,
-	) {}
+	) {
+		this.mc = createChildMonitoringContext({
+			logger,
+		});
+	}
 
+	// eslint-disable-next-line @rushstack/no-new-null
 	public async getVersions(versionId: string | null, count: number): Promise<IVersion[]> {
 		if (versionId !== this.id && versionId !== null) {
 			// Blobs/Trees in this scenario will never have multiple versions, so return versionId as is
@@ -159,6 +158,7 @@ export class WholeSummaryDocumentStorageService implements IDocumentStorageServi
 		}));
 	}
 
+	// eslint-disable-next-line @rushstack/no-new-null
 	public async getSnapshotTree(version?: IVersion): Promise<ISnapshotTree | null> {
 		let requestVersion = version;
 		if (!requestVersion) {
@@ -170,14 +170,24 @@ export class WholeSummaryDocumentStorageService implements IDocumentStorageServi
 			requestVersion = versions[0];
 		}
 
-		const normalizedWholeSnapshot = await this.snapshotTreeCache.get(
+		let normalizedWholeSnapshot = await this.snapshotTreeCache.get(
 			this.getCacheKey(requestVersion.id),
 		);
 		if (normalizedWholeSnapshot !== undefined) {
 			return normalizedWholeSnapshot.snapshotTree;
 		}
-		return (await this.fetchSnapshotTree(requestVersion.id, undefined, "getSnapshotTree"))
-			.snapshotTree;
+
+		normalizedWholeSnapshot = await this.fetchSnapshotTree(
+			requestVersion.id,
+			undefined,
+			"getSnapshotTree",
+		);
+
+		// Currently retrieving blobs from network is not supported by AFR for WholeSummaryDocumentStorageService
+		// Blobs are expected to be put in the cache
+		await this.updateBlobsCache(normalizedWholeSnapshot.blobs);
+
+		return normalizedWholeSnapshot.snapshotTree;
 	}
 
 	public async readBlob(blobId: string): Promise<ArrayBufferLike> {
@@ -186,6 +196,7 @@ export class WholeSummaryDocumentStorageService implements IDocumentStorageServi
 			return cachedBlob;
 		}
 
+		// Note: AFR does not support readBlobs, but potentially other r11s like servers do
 		const blob = await PerformanceEvent.timedExecAsync(
 			this.logger,
 			{
@@ -200,6 +211,8 @@ export class WholeSummaryDocumentStorageService implements IDocumentStorageServi
 				});
 				return response;
 			},
+			undefined, // workers
+			this.mc.config.getNumber("Fluid.Driver.ReadBlobTelemetrySampling"),
 		);
 		const bufferValue = stringToBuffer(blob.content, blob.encoding);
 
@@ -233,7 +246,7 @@ export class WholeSummaryDocumentStorageService implements IDocumentStorageServi
 	}
 
 	public async downloadSummary(summaryHandle: ISummaryHandle): Promise<ISummaryTree> {
-		const wholeFlatSummary = await PerformanceEvent.timedExecAsync(
+		const wholeFlatSnapshot = await PerformanceEvent.timedExecAsync(
 			this.logger,
 			{
 				eventName: "getWholeFlatSummary",
@@ -241,7 +254,7 @@ export class WholeSummaryDocumentStorageService implements IDocumentStorageServi
 			},
 			async (event) => {
 				const manager = await this.getStorageManager();
-				const response = await manager.getSummary(summaryHandle.handle);
+				const response = await manager.getSnapshot(summaryHandle.handle);
 				event.end({
 					size: response.content.trees[0]?.entries.length,
 				});
@@ -249,8 +262,8 @@ export class WholeSummaryDocumentStorageService implements IDocumentStorageServi
 			},
 		);
 
-		const { blobs, snapshotTree } = convertWholeFlatSummaryToSnapshotTreeAndBlobs(
-			wholeFlatSummary,
+		const { blobs, snapshotTree } = convertWholeFlatSnapshotToSnapshotTreeAndBlobs(
+			wholeFlatSnapshot,
 			"",
 		);
 		return convertSnapshotAndBlobsToSummaryTree(snapshotTree, blobs);
@@ -281,7 +294,7 @@ export class WholeSummaryDocumentStorageService implements IDocumentStorageServi
 		versionId: string,
 		disableCache?: boolean,
 		scenarioName?: string,
-	): Promise<INormalizedWholeSummary> {
+	): Promise<INormalizedWholeSnapshot> {
 		const normalizedWholeSummary = await PerformanceEvent.timedExecAsync(
 			this.logger,
 			{
@@ -291,12 +304,11 @@ export class WholeSummaryDocumentStorageService implements IDocumentStorageServi
 			},
 			async (event) => {
 				const manager = await this.getStorageManager(disableCache);
-				const response: IR11sResponse<IWholeFlatSummary> = await manager.getSummary(
-					versionId,
-				);
+				const response: IR11sResponse<IWholeFlatSnapshot> =
+					await manager.getSnapshot(versionId);
 				const start = performance.now();
-				const snapshot: INormalizedWholeSummary =
-					convertWholeFlatSummaryToSnapshotTreeAndBlobs(response.content);
+				const snapshot: INormalizedWholeSnapshot =
+					convertWholeFlatSnapshotToSnapshotTreeAndBlobs(response.content);
 				const snapshotConversionTime = performance.now() - start;
 				validateBlobsAndTrees(snapshot.snapshotTree);
 				const { trees, numBlobs, encodedBlobsSize } = evalBlobsAndTrees(snapshot);
@@ -306,6 +318,7 @@ export class WholeSummaryDocumentStorageService implements IDocumentStorageServi
 					trees,
 					blobs: numBlobs,
 					encodedBlobsSize,
+					sequenceNumber: snapshot.sequenceNumber,
 					...response.propsToLog,
 					snapshotConversionTime,
 					...getW3CData(response.requestUrl, "xmlhttprequest"),
@@ -322,13 +335,13 @@ export class WholeSummaryDocumentStorageService implements IDocumentStorageServi
 	}
 
 	private async initializeFromSnapshot(
-		normalizedWholeSummary: INormalizedWholeSummary,
+		normalizedWholeSummary: INormalizedWholeSnapshot,
 	): Promise<string> {
 		const snapshotId = normalizedWholeSummary.id;
 		assert(snapshotId !== undefined, 0x275 /* "Root tree should contain the id" */);
 		const cachePs: Promise<any>[] = [
 			this.snapshotTreeCache.put(this.getCacheKey(snapshotId), normalizedWholeSummary),
-			this.initBlobCache(normalizedWholeSummary.blobs),
+			this.updateBlobsCache(normalizedWholeSummary.blobs),
 		];
 
 		await Promise.all(cachePs);
@@ -336,7 +349,7 @@ export class WholeSummaryDocumentStorageService implements IDocumentStorageServi
 		return snapshotId;
 	}
 
-	private async initBlobCache(blobs: Map<string, ArrayBuffer>): Promise<void> {
+	private async updateBlobsCache(blobs: Map<string, ArrayBuffer>): Promise<void> {
 		const blobCachePutPs: Promise<void>[] = [];
 		blobs.forEach((value, id) => {
 			const cacheKey = this.getCacheKey(id);

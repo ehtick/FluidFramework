@@ -3,28 +3,61 @@
  * Licensed under the MIT License.
  */
 
-import React from "react";
 import {
-	tokens,
+	Table,
 	TableBody,
 	TableCell,
-	TableRow,
-	Table,
 	TableHeader,
 	TableHeaderCell,
+	TableRow,
+	tokens,
 } from "@fluentui/react-components";
 import {
-	Clock20Regular,
-	PlugConnected24Regular,
-	AlertBadge24Regular,
-	PlugDisconnected24Regular,
-	ErrorCircle24Regular,
-	Warning24Regular,
-	Attach24Regular,
-	LockClosed24Filled,
+	AlertBadgeRegular,
+	Attach20Regular,
+	Clock12Regular,
+	ErrorCircle20Regular,
+	LockClosed20Filled,
+	PlugConnected20Regular,
+	PlugDisconnected20Regular,
+	Warning20Regular,
 } from "@fluentui/react-icons";
-import { Stack, StackItem, IStackItemStyles } from "@fluentui/react";
-import { ConnectionStateChangeLogEntry } from "@fluid-experimental/devtools-core";
+import type { ConnectionStateChangeLogEntry } from "@fluidframework/devtools-core/internal";
+import React from "react";
+
+import { ThemeContext, ThemeOption } from "../ThemeHelper.js";
+
+import { LabelCellLayout } from "./utility-components/index.js";
+
+/**
+ * Returns the text color based on the current color theme of the devtools.
+ */
+function setThemeStyle(themeName: ThemeOption, state: string): string {
+	if (themeName === ThemeOption.HighContrast) {
+		switch (state) {
+			case "attached": {
+				return "#FFF";
+			}
+			case "closed": {
+				return "#000";
+			}
+			case "connected": {
+				return "#FFF";
+			}
+			case "disconnected": {
+				return "#000";
+			}
+			case "disposed": {
+				return "#000";
+			}
+			default: {
+				console.log("Unknown state type for container!");
+				return "";
+			}
+		}
+	}
+	return "";
+}
 
 /**
  * Represents container state history data which is rendered in {@link ContainerHistoryLog}.
@@ -41,6 +74,7 @@ export interface ContainerHistoryLogProps {
  */
 export function ContainerHistoryLog(props: ContainerHistoryLogProps): React.ReactElement {
 	const { containerHistory } = props;
+	const { themeInfo } = React.useContext(ThemeContext);
 
 	// Columns for rendering container state history.
 	const containerHistoryColumns = [
@@ -50,46 +84,47 @@ export function ContainerHistoryLog(props: ContainerHistoryLogProps): React.Reac
 
 	const getBackgroundColorForState = (state: string): string => {
 		switch (state) {
-			case "attached":
-				return tokens.colorPaletteRoyalBlueBackground2; // blue
-			case "closed":
-				return tokens.colorPaletteRedBorder1; // red
-			case "connected":
-				return tokens.colorPaletteGreenBackground2; // green
-			case "disconnected":
-				return tokens.colorPaletteDarkOrangeBorderActive; // orange
-			case "disposed":
-				return tokens.colorPaletteDarkRedBackground2; // dark red
-			default:
+			case "attached": {
+				// blue
+				return tokens.colorPaletteRoyalBlueBackground2;
+			}
+			case "closed": {
+				// red
+				return tokens.colorPaletteRedBorder1;
+			}
+			case "connected": {
+				// green
+				return tokens.colorPaletteGreenBackground2;
+			}
+			case "disconnected": {
+				// orange
+				return tokens.colorPaletteDarkOrangeBorder1;
+			}
+			case "disposed": {
+				// dark red
+				return tokens.colorPaletteDarkRedBackground2;
+			}
+			default: {
 				console.log("Unknown state type for container!");
-				return tokens.colorBrandBackgroundPressed; // black
+
+				// black
+				return tokens.colorBrandBackgroundPressed;
+			}
 		}
 	};
 
-	const itemStyles: IStackItemStyles = {
-		root: {
-			paddingTop: "6px",
-			paddingBottom: "6px",
-		},
-	};
-
-	const itemStateStyle: IStackItemStyles = {
-		root: {
-			marginTop: "8px",
-			marginBottom: "8px",
-			marginLeft: "5px",
-		},
-	};
-
 	return (
-		<Table size="small" aria-label="Audience history table">
+		<Table size="extra-small" aria-label="Audience history table">
 			<TableHeader>
 				<TableRow>
 					{containerHistoryColumns.map((column, columnIndex) => (
 						<TableHeaderCell key={columnIndex}>
-							{column.columnKey === "state" && <AlertBadge24Regular />}
-							{column.columnKey === "time" && <Clock20Regular />}
-							{column.label}
+							{column.columnKey === "state" && (
+								<LabelCellLayout icon={<AlertBadgeRegular />}>{column.label}</LabelCellLayout>
+							)}
+							{column.columnKey === "time" && (
+								<LabelCellLayout icon={<Clock12Regular />}>{column.label}</LabelCellLayout>
+							)}
 						</TableHeaderCell>
 					))}
 				</TableRow>
@@ -106,19 +141,25 @@ export function ContainerHistoryLog(props: ContainerHistoryLogProps): React.Reac
 
 					const getStateIcon = (state: string): React.ReactElement => {
 						switch (state) {
-							case "attached":
-								return <Attach24Regular />;
-							case "closed":
-								return <LockClosed24Filled />;
-							case "connected":
-								return <PlugConnected24Regular />;
-							case "disconnected":
-								return <PlugDisconnected24Regular />;
-							case "disposed":
-								return <ErrorCircle24Regular />;
-							default:
+							case "attached": {
+								return <Attach20Regular />;
+							}
+							case "closed": {
+								return <LockClosed20Filled />;
+							}
+							case "connected": {
+								return <PlugConnected20Regular />;
+							}
+							case "disconnected": {
+								return <PlugDisconnected20Regular />;
+							}
+							case "disposed": {
+								return <ErrorCircle20Regular />;
+							}
+							default: {
 								console.log("Unknown state type for container!");
-								return <Warning24Regular />;
+								return <Warning20Regular />;
+							}
 						}
 					};
 
@@ -129,15 +170,20 @@ export function ContainerHistoryLog(props: ContainerHistoryLogProps): React.Reac
 								backgroundColor: getBackgroundColorForState(item.newState),
 							}}
 						>
-							<TableCell>
-								<Stack horizontal>
-									<StackItem styles={itemStyles}>
-										{getStateIcon(item.newState)}
-									</StackItem>
-									<StackItem styles={itemStateStyle}>{item.newState}</StackItem>
-								</Stack>
+							<TableCell style={{ color: setThemeStyle(themeInfo.name, item.newState) }}>
+								<LabelCellLayout icon={getStateIcon(item.newState)}>
+									<span
+										style={{
+											color: setThemeStyle(themeInfo.name, item.newState),
+										}}
+									>
+										{item.newState}
+									</span>
+								</LabelCellLayout>
 							</TableCell>
-							<TableCell>{timestampDisplay}</TableCell>
+							<TableCell style={{ color: setThemeStyle(themeInfo.name, item.newState) }}>
+								{timestampDisplay}
+							</TableCell>
 						</TableRow>
 					);
 				})}

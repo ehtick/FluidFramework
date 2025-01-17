@@ -2,46 +2,48 @@
  * Copyright (c) Microsoft Corporation and contributors. All rights reserved.
  * Licensed under the MIT License.
  */
-import { Stack } from "@fluentui/react";
-import { Tab, TabList, TabValue, SelectTabData, SelectTabEvent } from "@fluentui/react-components";
+
 import {
-	ContainerDevtoolsFeature,
-	ContainerDevtoolsFeatureFlags,
+	Divider,
+	type SelectTabData,
+	type SelectTabEvent,
+	Tab,
+	TabList,
+	type TabValue,
+	makeStyles,
+	shorthands,
+} from "@fluentui/react-components";
+import {
+	type ContainerDevtoolsFeatureFlags,
 	ContainerDevtoolsFeatures,
 	GetContainerDevtoolsFeatures,
-	HasContainerId,
-	ISourcedDevtoolsMessage,
-	InboundHandlers,
+	type HasContainerKey,
+	type ISourcedDevtoolsMessage,
+	type InboundHandlers,
 	handleIncomingMessage,
-} from "@fluid-experimental/devtools-core";
+} from "@fluidframework/devtools-core/internal";
 import React from "react";
 
-import { initializeFluentUiIcons } from "../InitializeIcons";
-import { useMessageRelay } from "../MessageRelayContext";
-import { AudienceView } from "./AudienceView";
-import { ContainerHistoryView } from "./ContainerHistoryView";
-import { ContainerSummaryView } from "./ContainerSummaryView";
-import { DataObjectsView } from "./DataObjectsView";
-import { Waiting } from "./Waiting";
+import { ContainerFeatureFlagContext } from "../ContainerFeatureFlagHelper.js";
+import { useMessageRelay } from "../MessageRelayContext.js";
+import { useLogger } from "../TelemetryUtils.js";
+
+import { AudienceView } from "./AudienceView.js";
+import { ContainerHistoryView } from "./ContainerHistoryView.js";
+import { ContainerSummaryView } from "./ContainerSummaryView.js";
+import { DataObjectsView } from "./DataObjectsView.js";
+import { Waiting } from "./Waiting.js";
 
 // TODOs:
 // - Allow consumers to specify additional tabs / views for list of inner app view options.
 // - History of client ID changes
 
-// Ensure FluentUI icons are initialized for use below.
-initializeFluentUiIcons();
-
 const loggingContext = "INLINE(ContainerView)";
-
-/**
- * `className` used by {@link ContainerDevtoolsView}.
- */
-const containerDevtoolsViewClassName = `fluid-client-debugger-view`;
 
 /**
  * {@link ContainerDevtoolsView} input props.
  */
-export type ContainerDevtoolsViewProps = HasContainerId;
+export type ContainerDevtoolsViewProps = HasContainerKey;
 
 /**
  * Inner view options within the container view.
@@ -67,14 +69,22 @@ enum PanelView {
 	// - Ops/message latency stats
 }
 
+const useStyles = makeStyles({
+	root: {
+		...shorthands.gap("15px"),
+		display: "flex",
+		flexDirection: "column",
+	},
+});
+
 /**
  * Container Devtools view.
- * Communicates with {@link @fluid-experimental/devtools-core#ContainerDevtools} via {@link MessageRelayContext} to get
+ * Communicates with {@link @fluidframework/devtools-core#ContainerDevtools} via {@link MessageRelayContext} to get
  * Container-level stats to display, including Container states and history, Audience state and history, and Container
  * data.
  */
 export function ContainerDevtoolsView(props: ContainerDevtoolsViewProps): React.ReactElement {
-	const { containerId } = props;
+	const { containerKey } = props;
 
 	// Set of features supported by the corresponding Container-level devtools instance.
 	const [supportedFeatures, setSupportedFeatures] = React.useState<
@@ -88,10 +98,11 @@ export function ContainerDevtoolsView(props: ContainerDevtoolsViewProps): React.
 		 * Handlers for inbound messages related to the registry.
 		 */
 		const inboundMessageHandlers: InboundHandlers = {
-			[ContainerDevtoolsFeatures.MessageType]: (untypedMessage) => {
+			[ContainerDevtoolsFeatures.MessageType]: async (untypedMessage) => {
 				const message = untypedMessage as ContainerDevtoolsFeatures.Message;
-				if (message.data.containerId === containerId) {
+				if (message.data.containerKey === containerKey) {
 					setSupportedFeatures(message.data.features);
+
 					return true;
 				}
 				return false;
@@ -110,24 +121,27 @@ export function ContainerDevtoolsView(props: ContainerDevtoolsViewProps): React.
 		messageRelay.on("message", messageHandler);
 
 		// Query for supported feature set
-		messageRelay.postMessage(GetContainerDevtoolsFeatures.createMessage({ containerId }));
+		messageRelay.postMessage(GetContainerDevtoolsFeatures.createMessage({ containerKey }));
 
 		return (): void => {
 			messageRelay.off("message", messageHandler);
 		};
-	}, [containerId, messageRelay, setSupportedFeatures]);
+	}, [containerKey, messageRelay, setSupportedFeatures]);
 
 	return supportedFeatures === undefined ? (
 		<Waiting />
 	) : (
-		<_ContainerDevtoolsView containerId={containerId} supportedFeatures={supportedFeatures} />
+		<_ContainerDevtoolsView
+			containerKey={containerKey}
+			supportedFeatures={supportedFeatures}
+		/>
 	);
 }
 
 /**
  * {@link _ContainerDevtoolsView} input props.
  */
-interface _ContainerDevtoolsViewProps extends HasContainerId {
+interface _ContainerDevtoolsViewProps extends HasContainerKey {
 	/**
 	 * Set of features supported by the corresponding Container-level devtools instance.
 	 */
@@ -138,64 +152,67 @@ interface _ContainerDevtoolsViewProps extends HasContainerId {
  * Internal {@link ContainerDevtoolsView}, displayed after supported feature set has been acquired from the webpage.
  */
 function _ContainerDevtoolsView(props: _ContainerDevtoolsViewProps): React.ReactElement {
-	const { containerId, supportedFeatures } = props;
+	const { containerKey, supportedFeatures } = props;
+
+	const styles = useStyles();
+	const usageLogger = useLogger();
 	const panelViews = Object.values(PanelView);
 	// Inner view selection
 	const [innerViewSelection, setInnerViewSelection] = React.useState<TabValue>(
-		supportedFeatures[ContainerDevtoolsFeature.ContainerData] === true
+		supportedFeatures.containerDataVisualization === true
 			? PanelView.ContainerData
 			: PanelView.ContainerStateHistory,
 	);
 
 	let innerView: React.ReactElement;
 	switch (innerViewSelection) {
-		case PanelView.ContainerData:
-			innerView = <DataObjectsView containerId={containerId} />;
+		case PanelView.ContainerData: {
+			innerView = (
+				<ContainerFeatureFlagContext.Provider
+					value={{ containerFeatureFlags: supportedFeatures }}
+				>
+					<DataObjectsView containerKey={containerKey} />
+				</ContainerFeatureFlagContext.Provider>
+			);
 			break;
-		case PanelView.Audience:
-			innerView = <AudienceView containerId={containerId} />;
+		}
+		case PanelView.Audience: {
+			innerView = <AudienceView containerKey={containerKey} />;
 			break;
-		case PanelView.ContainerStateHistory:
-			innerView = <ContainerHistoryView containerId={containerId} />;
+		}
+		case PanelView.ContainerStateHistory: {
+			innerView = <ContainerHistoryView containerKey={containerKey} />;
 			break;
-		default:
+		}
+		default: {
 			throw new Error(`Unrecognized PanelView selection value: "${innerViewSelection}".`);
+		}
 	}
 
 	const onTabSelect = (event: SelectTabEvent, data: SelectTabData): void => {
 		setInnerViewSelection(data.value);
+		usageLogger?.sendTelemetryEvent({
+			eventName: "Navigation",
+			details: { target: `Container_${data.value}Tab` },
+		});
 	};
 
 	return (
-		<Stack
-			tokens={{
-				// Add some spacing between the menu and the inner view
-				childrenGap: 25,
-			}}
-			styles={{
-				root: {
-					height: "100%",
-				},
-			}}
-			className={containerDevtoolsViewClassName}
-		>
-			<Stack.Item>
-				<ContainerSummaryView containerId={containerId} />
-			</Stack.Item>
-			<Stack.Item style={{ width: "100%", height: "100%", overflowY: "auto" }}>
-				<Stack tokens={{ childrenGap: 10 }}>
-					<TabList selectedValue={innerViewSelection} onTabSelect={onTabSelect}>
-						{panelViews.map((view: string) => {
-							return (
-								<Tab key={view} value={view}>
-									{view}
-								</Tab>
-							);
-						})}
-					</TabList>
-					{innerView}
-				</Stack>
-			</Stack.Item>
-		</Stack>
+		<div className={styles.root}>
+			<ContainerSummaryView containerKey={containerKey} />
+			<Divider appearance="strong" />
+			<div>
+				<TabList selectedValue={innerViewSelection} onTabSelect={onTabSelect}>
+					{panelViews.map((view: string) => {
+						return (
+							<Tab key={view} value={view}>
+								{view}
+							</Tab>
+						);
+					})}
+				</TabList>
+				{innerView}
+			</div>
+		</div>
 	);
 }

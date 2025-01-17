@@ -11,6 +11,12 @@ export enum GitRestLumberEventName {
 	RetrieveLatestFullSummaryFromStorage = "RetrieveLatestFullSummaryFromStorage",
 	WholeSummaryManagerReadSummary = "ReadSummary",
 	WholeSummaryManagerWriteSummary = "WriteSummary",
+	WholeSummaryManagerDeleteSummary = "DeleteSummary",
+	ComputeSummaryTreeEntries = "ComputeSummaryTreeEntries",
+	WriteSummaryTree = "WriteSummaryTree",
+	CreateSummaryVersion = "CreateSummaryVersion",
+	CreateDocumentRef = "CreateDocumentRef",
+	UpdateDocumentRef = "UpdateDocumentRef",
 
 	// Misc
 	CheckSoftDeleted = "CheckSoftDeleted",
@@ -24,7 +30,9 @@ export enum GitRestLumberEventName {
 export enum BaseGitRestTelemetryProperties {
 	directoryPath = "directoryPath",
 	emptyFullSummary = "emptyFullSummary",
-	fullSummaryirectoryExists = "fullSummaryirectoryExists",
+	fullSummaryDirectoryExists = "fullSummaryDirectoryExists",
+	isEphemeralContainer = "isEphemeralContainer",
+	isInitial = "isInitial",
 	ref = "ref",
 	repoName = "repoName",
 	repoOwner = "repoOwner",
