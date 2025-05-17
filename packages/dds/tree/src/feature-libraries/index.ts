@@ -109,6 +109,7 @@ export {
 	type FieldBatchCodec,
 	makeTreeChunker,
 	makeFieldBatchCodec,
+	fluidVersionToFieldBatchCodecWriteVersion,
 	type FieldBatchEncodingContext,
 } from "./chunked-forest/index.js";
 
@@ -142,9 +143,10 @@ export {
 	fieldKindConfigurations,
 	intoDelta,
 	relevantRemovedRoots,
-	SchemaValidationErrors,
+	SchemaValidationError,
 	isNodeInSchema,
 	isFieldInSchema,
+	inSchemaOrThrow,
 } from "./default-schema/index.js";
 
 export {
@@ -158,7 +160,6 @@ export {
 	type FlexTreeEntity,
 	type FlexTreeField,
 	type FlexTreeNode,
-	getTreeContext,
 	TreeStatus,
 	Context,
 	type FlexTreeNodeEvents,
